@@ -1,0 +1,17 @@
+services:
+  postgres-db:
+    image: postgres:latest
+    container_name: strings-top10-db
+    restart: always
+    environment:
+      POSTGRES_USER: lucas_dev
+      POSTGRES_PASSWORD: 123
+      POSTGRES_DB: cordas_db
+    ports:
+      - "5432:5432"
+    volumes:
+      # Mudamos de /var/lib/postgresql/data para apenas /var/lib/postgresql
+      - postgres_data:/var/lib/postgresql
+
+volumes:
+  postgres_data:
