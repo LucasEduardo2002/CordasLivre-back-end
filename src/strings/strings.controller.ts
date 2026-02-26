@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { StringsSyncService } from './strings-sync/strings-sync.service';
 
 @Controller('strings')
@@ -16,5 +16,20 @@ export class StringsController
     @Get()
     async getAllStrings(@Query('type') type?: string) {
     return await this.stringsSyncService.getTopStrings(type);
+  }
+
+  @Post('ai-review')
+  async generateAiReview(
+    @Body()
+    body: {
+      title?: string;
+      price?: number;
+      ratingAvg?: number | null;
+      ratingCount?: number;
+      type?: string;
+      permalink?: string;
+    },
+  ) {
+    return await this.stringsSyncService.generateAiReview(body);
   }
 }

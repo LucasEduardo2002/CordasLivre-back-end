@@ -1,4 +1,4 @@
-import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosError } from 'axios';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Cron } from '@nestjs/schedule';
@@ -15,6 +15,25 @@ type CatalogProduct = {
   rankingScore?: number;
 };
 
+type AiReviewPayload = {
+  title: string;
+  price: number;
+  ratingAvg: number | null;
+  ratingCount: number;
+  type: StringType;
+  permalink?: string;
+};
+
+type AiReviewResult = {
+  title: string;
+  summary: string;
+  pros: string[];
+  attentionPoints: string[];
+  verdict: string;
+  confidence: 'baixa' | 'media' | 'alta';
+  generatedAt: string;
+};
+
 @Injectable()
 export class StringsSyncService {
   private readonly logger = new Logger(StringsSyncService.name);
@@ -29,6 +48,207 @@ export class StringsSyncService {
     { type: StringType.VIOLA_CAIPIRA, label: 'Viola Caipira', query: 'encordoamento viola caipira' },
     { type: StringType.VIOLINO, label: 'Violino', query: 'encordoamento violino' },
   ];
+
+  private getTypeLabel(type: StringType): string {
+    const labels: Record<StringType, string> = {
+      [StringType.VIOLAO]: 'violão',
+      [StringType.GUITARRA]: 'guitarra',
+      [StringType.CONTRABAIXO]: 'contrabaixo',
+      [StringType.CAVAQUINHO]: 'cavaquinho',
+      [StringType.VIOLA_CAIPIRA]: 'viola caipira',
+      [StringType.VIOLINO]: 'violino',
+    };
+
+    return labels[type] ?? 'instrumento de cordas';
+  }
+
+  private normalizeAiReviewPayload(input: {
+    title?: string;
+    price?: number;
+    ratingAvg?: number | null;
+    ratingCount?: number;
+    type?: string;
+    permalink?: string;
+  }): AiReviewPayload {
+    const title = String(input?.title ?? '').trim();
+    if (!title) {
+      throw new BadRequestException('Título do produto é obrigatório para gerar avaliação IA.');
+    }
+
+    const parsedPrice = Number(input?.price ?? 0);
+    const price = Number.isFinite(parsedPrice) && parsedPrice >= 0 ? parsedPrice : 0;
+
+    const parsedRatingAvg = Number(input?.ratingAvg);
+    const ratingAvg =
+      input?.ratingAvg === null
+        ? null
+        : Number.isFinite(parsedRatingAvg)
+          ? Math.max(0, Math.min(5, parsedRatingAvg))
+          : null;
+
+    const parsedRatingCount = Number(input?.ratingCount ?? 0);
+    const ratingCount = Number.isFinite(parsedRatingCount) && parsedRatingCount > 0 ? Math.floor(parsedRatingCount) : 0;
+
+    return {
+      title,
+      price,
+      ratingAvg,
+      ratingCount,
+      type: this.resolveStringType(input?.type),
+      permalink: String(input?.permalink ?? '').trim() || undefined,
+    };
+  }
+
+  private buildLocalAiReview(payload: AiReviewPayload): AiReviewResult {
+    const instrumentLabel = this.getTypeLabel(payload.type);
+    const hasRating = payload.ratingAvg !== null;
+    const ratingText = hasRating
+      ? `${payload.ratingAvg?.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/5`
+      : 'sem nota consolidada';
+
+    const confidence: AiReviewResult['confidence'] =
+      payload.ratingCount >= 120 ? 'alta' : payload.ratingCount >= 30 ? 'media' : 'baixa';
+
+    const valueBand = payload.price <= 70 ? 'entrada' : payload.price <= 180 ? 'intermediário' : 'premium';
+
+    const pros = [
+      hasRating
+        ? `Recepção do público positiva (${ratingText} com ${payload.ratingCount.toLocaleString('pt-BR')} avaliações).`
+        : 'Produto ativo no marketplace com dados suficientes para comparação de preço e posicionamento.',
+      `Faixa de valor classificada como ${valueBand}, útil para quem busca custo-benefício em ${instrumentLabel}.`,
+      'Link direto para compra no Mercado Livre, agilizando a decisão final.',
+    ];
+
+    const attentionPoints = [
+      'Verifique calibre, material e tensão no anúncio para garantir compatibilidade com seu instrumento.',
+      'Confirme reputação do vendedor e prazo de entrega antes de concluir.',
+    ];
+
+    if (payload.ratingCount < 10) {
+      attentionPoints.push('Amostra de avaliações ainda pequena; trate a nota como referência inicial.');
+    }
+
+    const summary = hasRating
+      ? `Com base no histórico de avaliações (${ratingText}) e no volume de feedback (${payload.ratingCount.toLocaleString(
+          'pt-BR',
+        )}), este item aparece como uma opção competitiva para ${instrumentLabel}.`
+      : `Ainda sem nota consolidada do marketplace, mas o produto entra como alternativa para ${instrumentLabel} com base em relevância e preço.`;
+
+    const safeRating = payload.ratingAvg ?? 0;
+
+    const verdict = hasRating
+      ? safeRating >= 4.7
+        ? 'Indicação forte para compra, principalmente se o anúncio confirmar o calibre ideal para seu uso.'
+        : safeRating >= 4.3
+          ? 'Boa opção de compra para uso geral, com atenção aos detalhes técnicos do encordoamento.'
+          : 'Opção viável, mas vale comparar com itens de nota mais alta antes de decidir.'
+      : 'Sem nota consolidada: recomendado comparar com 2-3 opções avaliadas antes de finalizar a compra.';
+
+    return {
+      title: payload.title,
+      summary,
+      pros,
+      attentionPoints,
+      verdict,
+      confidence,
+      generatedAt: new Date().toISOString(),
+    };
+  }
+
+  private async generateReviewWithOpenAi(payload: AiReviewPayload): Promise<AiReviewResult | null> {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return null;
+    }
+
+    try {
+      const instrumentLabel = this.getTypeLabel(payload.type);
+      const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+
+      const { data } = await axios.post(
+        'https://api.openai.com/v1/chat/completions',
+        {
+          model,
+          temperature: 0.6,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Você é um analista de produtos musicais. Gere uma análise curta, clara e honesta em português do Brasil. Responda somente JSON válido com: summary (string), pros (array de 3 strings), attentionPoints (array de 2 ou 3 strings), verdict (string), confidence (baixa|media|alta).',
+            },
+            {
+              role: 'user',
+              content: `Produto: ${payload.title}\nInstrumento: ${instrumentLabel}\nPreço: R$ ${payload.price.toFixed(
+                2,
+              )}\nNota média: ${payload.ratingAvg ?? 'sem nota'}\nQuantidade de avaliações: ${payload.ratingCount}`,
+            },
+          ],
+        },
+        {
+          timeout: 20000,
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+        },
+      );
+
+      const content = data?.choices?.[0]?.message?.content;
+      if (!content) {
+        return null;
+      }
+
+      const parsed = JSON.parse(content);
+      const confidenceRaw = String(parsed?.confidence ?? '').toLowerCase();
+      const confidence: AiReviewResult['confidence'] =
+        confidenceRaw === 'alta' || confidenceRaw === 'media' || confidenceRaw === 'baixa'
+          ? confidenceRaw
+          : 'media';
+
+      return {
+        title: payload.title,
+        summary: String(parsed?.summary ?? '').trim() || 'Análise gerada por IA indisponível no momento.',
+        pros: Array.isArray(parsed?.pros)
+          ? parsed.pros.map((item) => String(item)).filter(Boolean).slice(0, 3)
+          : [],
+        attentionPoints: Array.isArray(parsed?.attentionPoints)
+          ? parsed.attentionPoints.map((item) => String(item)).filter(Boolean).slice(0, 3)
+          : [],
+        verdict: String(parsed?.verdict ?? '').trim() || 'Compare com outros anúncios antes de concluir a compra.',
+        confidence,
+        generatedAt: new Date().toISOString(),
+      };
+    } catch (error) {
+      this.logger.warn(`OpenAI indisponível para avaliação IA: ${error?.message || error}`);
+      return null;
+    }
+  }
+
+  async generateAiReview(input: {
+    title?: string;
+    price?: number;
+    ratingAvg?: number | null;
+    ratingCount?: number;
+    type?: string;
+    permalink?: string;
+  }) {
+    const payload = this.normalizeAiReviewPayload(input);
+    const openAiResult = await this.generateReviewWithOpenAi(payload);
+    const review = openAiResult ?? this.buildLocalAiReview(payload);
+
+    return {
+      product: {
+        title: payload.title,
+        price: payload.price,
+        ratingAvg: payload.ratingAvg,
+        ratingCount: payload.ratingCount,
+        type: payload.type,
+        permalink: payload.permalink,
+      },
+      review,
+    };
+  }
 
   private buildAffiliatePermalink(baseUrl: string, affiliateTag: string): string {
     const url = new URL(baseUrl);
