@@ -9,6 +9,8 @@ async function bootstrap() {
     'http://localhost:5173',
     'http://localhost:3000',
     'https://cordas-livre-front-end.vercel.app',
+    'https://www.cordaslivre.com.br',
+    'https://cordaslivre.com.br',
   ];
 
   const envOrigins = (process.env.CORS_ORIGINS ?? '')
@@ -16,7 +18,7 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  const allowedOrigins = new Set(envOrigins.length > 0 ? envOrigins : defaultOrigins);
+  const allowedOrigins = new Set([...defaultOrigins, ...envOrigins]);
 
   const vercelPreviewPattern = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
 
