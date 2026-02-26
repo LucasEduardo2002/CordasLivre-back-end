@@ -34,6 +34,22 @@ type AiReviewResult = {
   generatedAt: string;
 };
 
+type TechnicalProfile = {
+  material: string;
+  coating: string;
+  gauge: string;
+  tension: string;
+  purpose: string;
+};
+
+type MarketQualitySignal = {
+  qualityIndex: number;
+  qualityBand: 'muito alta' | 'alta' | 'boa' | 'regular';
+  confidence: 'baixa' | 'media' | 'alta';
+  ratingText: string;
+  sampleText: string;
+};
+
 @Injectable()
 export class StringsSyncService {
   private readonly logger = new Logger(StringsSyncService.name);
@@ -99,50 +115,128 @@ export class StringsSyncService {
     };
   }
 
-  private buildLocalAiReview(payload: AiReviewPayload): AiReviewResult {
-    const instrumentLabel = this.getTypeLabel(payload.type);
-    const hasRating = payload.ratingAvg !== null;
-    const ratingText = hasRating
-      ? `${payload.ratingAvg?.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/5`
-      : 'sem nota consolidada';
+  private inferTechnicalProfile(payload: AiReviewPayload): TechnicalProfile {
+    const normalizedTitle = this.normalizeText(payload.title);
+    const contains = (...tokens: string[]) => tokens.some((token) => normalizedTitle.includes(token));
 
-    const confidence: AiReviewResult['confidence'] =
+    const material =
+      contains('nylon', 'nailon')
+        ? 'Nylon (toque mais macio e timbre quente)'
+        : contains('fosforo bronze', 'phosphor bronze')
+          ? 'Fósforo Bronze (equilíbrio entre brilho e corpo)'
+          : contains('80/20', 'bronze')
+            ? 'Bronze 80/20 (ataque brilhante e projeção)'
+            : contains('aco inox', 'inox')
+              ? 'Aço inox (durabilidade maior e brilho acentuado)'
+              : contains('niquel', 'nickel')
+                ? 'Níquel/niquelado (resposta equilibrada, comum em guitarra/baixo)'
+                : 'Material não identificado claramente no título';
+
+    const coating =
+      contains('coated', 'nanoweb', 'polyweb', 'elixir')
+        ? 'Com revestimento (tende a durar mais, com toque mais suave)'
+        : 'Sem indicação clara de revestimento';
+
+    const gaugeMatch = normalizedTitle.match(/\b(0?\d{2})\s*[-x]\s*(0?\d{2})\b/);
+    const gaugeSingleMatch = normalizedTitle.match(/\b(009|010|011|012|013|045|050|085|100|105)\b/);
+    const gauge = gaugeMatch
+      ? `Calibre provável ${gaugeMatch[1]}-${gaugeMatch[2]}`
+      : gaugeSingleMatch
+        ? `Calibre provável ${gaugeSingleMatch[1]}`
+        : 'Calibre não identificado no título';
+
+    const tension =
+      contains('extra light', 'super light')
+        ? 'Tensão leve (tocabilidade facilitada)'
+        : contains('light')
+          ? 'Tensão leve/média leve'
+          : contains('medium', 'medio')
+            ? 'Tensão média (equilíbrio entre conforto e volume)'
+            : contains('heavy')
+              ? 'Tensão alta (mais projeção, exige mais pegada)'
+              : 'Tensão não especificada no título';
+
+    const purposeByType: Record<StringType, string> = {
+      [StringType.VIOLAO]: contains('nylon', 'nailon')
+        ? 'Finalidade sugerida: estudo, MPB e violão clássico'
+        : 'Finalidade sugerida: violão aço para batida, dedilhado e uso geral',
+      [StringType.GUITARRA]: 'Finalidade sugerida: uso geral em guitarra (base, solo e prática)',
+      [StringType.CONTRABAIXO]: 'Finalidade sugerida: contrabaixo para prática, ensaio e palco',
+      [StringType.CAVAQUINHO]: 'Finalidade sugerida: cavaquinho para base e condução rítmica',
+      [StringType.VIOLA_CAIPIRA]: 'Finalidade sugerida: viola caipira para repertório sertanejo e regional',
+      [StringType.VIOLINO]: 'Finalidade sugerida: violino para estudo e performance conforme setup',
+    };
+
+    return {
+      material,
+      coating,
+      gauge,
+      tension,
+      purpose: purposeByType[payload.type],
+    };
+  }
+
+  private buildMarketQualitySignal(payload: AiReviewPayload): MarketQualitySignal {
+    const hasRating = payload.ratingAvg !== null;
+    const baseRating = payload.ratingAvg ?? 4;
+    const normalizedRating = Math.max(0, Math.min(1, baseRating / 5));
+    const volumeFactor = Math.min(1, Math.log10(payload.ratingCount + 1) / Math.log10(200));
+    const qualityIndex = Math.round(normalizedRating * 75 + volumeFactor * 25);
+
+    const qualityBand: MarketQualitySignal['qualityBand'] =
+      qualityIndex >= 88 ? 'muito alta' : qualityIndex >= 78 ? 'alta' : qualityIndex >= 68 ? 'boa' : 'regular';
+
+    const confidence: MarketQualitySignal['confidence'] =
       payload.ratingCount >= 120 ? 'alta' : payload.ratingCount >= 30 ? 'media' : 'baixa';
 
+    return {
+      qualityIndex,
+      qualityBand,
+      confidence,
+      ratingText: hasRating
+        ? `${payload.ratingAvg?.toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}/5`
+        : 'sem nota consolidada',
+      sampleText: `${payload.ratingCount.toLocaleString('pt-BR')} ${payload.ratingCount === 1 ? 'avaliação' : 'avaliações'}`,
+    };
+  }
+
+  private buildLocalAiReview(payload: AiReviewPayload): AiReviewResult {
+    const instrumentLabel = this.getTypeLabel(payload.type);
+    const profile = this.inferTechnicalProfile(payload);
+    const signal = this.buildMarketQualitySignal(payload);
+    const hasRating = payload.ratingAvg !== null;
     const valueBand = payload.price <= 70 ? 'entrada' : payload.price <= 180 ? 'intermediário' : 'premium';
 
     const pros = [
       hasRating
-        ? `Recepção do público positiva (${ratingText} com ${payload.ratingCount.toLocaleString('pt-BR')} avaliações).`
-        : 'Produto ativo no marketplace com dados suficientes para comparação de preço e posicionamento.',
-      `Faixa de valor classificada como ${valueBand}, útil para quem busca custo-benefício em ${instrumentLabel}.`,
-      'Link direto para compra no Mercado Livre, agilizando a decisão final.',
+        ? `Aceitação de mercado ${signal.qualityBand} (nota ${signal.ratingText}, amostra ${signal.sampleText}, índice técnico ${signal.qualityIndex}/100).`
+        : `Sem nota consolidada; análise técnica baseada em finalidade, especificação percebida e faixa de preço (${valueBand}).`,
+      `${profile.material}. ${profile.coating}.`,
+      `${profile.gauge}. ${profile.tension}. ${profile.purpose}.`,
     ];
 
     const attentionPoints = [
-      'Verifique calibre, material e tensão no anúncio para garantir compatibilidade com seu instrumento.',
-      'Confirme reputação do vendedor e prazo de entrega antes de concluir.',
+      'Confirme no anúncio o calibre exato e a tensão para evitar desconforto na tocabilidade e ajuste indevido do instrumento.',
+      'Valide material e revestimento com as fotos/descrição do vendedor para garantir o timbre e a durabilidade esperados.',
     ];
 
     if (payload.ratingCount < 10) {
-      attentionPoints.push('Amostra de avaliações ainda pequena; trate a nota como referência inicial.');
+      attentionPoints.push('Amostra de avaliações pequena; trate o índice de qualidade como preliminar e compare com opções de maior volume.');
     }
 
     const summary = hasRating
-      ? `Com base no histórico de avaliações (${ratingText}) e no volume de feedback (${payload.ratingCount.toLocaleString(
-          'pt-BR',
-        )}), este item aparece como uma opção competitiva para ${instrumentLabel}.`
-      : `Ainda sem nota consolidada do marketplace, mas o produto entra como alternativa para ${instrumentLabel} com base em relevância e preço.`;
+      ? `Análise técnica para ${instrumentLabel}: nota ${signal.ratingText} com ${signal.sampleText}, índice ${signal.qualityIndex}/100 e classificação ${signal.qualityBand}. O conjunto de especificações percebidas no título indica foco em ${profile.purpose.toLowerCase().replace('finalidade sugerida: ', '')}.`
+      : `Análise técnica para ${instrumentLabel}: sem nota consolidada, então o parecer prioriza qualidade percebida no título (material, calibre/tensão e finalidade) e posicionamento de preço ${valueBand}.`;
 
     const safeRating = payload.ratingAvg ?? 0;
 
     const verdict = hasRating
       ? safeRating >= 4.7
-        ? 'Indicação forte para compra, principalmente se o anúncio confirmar o calibre ideal para seu uso.'
+        ? `Indicação técnica forte para compra, desde que o anúncio confirme ${profile.gauge.toLowerCase()} e ${profile.tension.toLowerCase()} adequados ao seu setup.`
         : safeRating >= 4.3
-          ? 'Boa opção de compra para uso geral, com atenção aos detalhes técnicos do encordoamento.'
-          : 'Opção viável, mas vale comparar com itens de nota mais alta antes de decidir.'
-      : 'Sem nota consolidada: recomendado comparar com 2-3 opções avaliadas antes de finalizar a compra.';
+          ? `Boa alternativa técnica para ${instrumentLabel}, com necessidade de validação final de material e tensão conforme sua finalidade de uso.`
+          : `Opção tecnicamente viável, porém com aceitação de mercado abaixo do ideal; compare com produtos de índice técnico superior antes da decisão.`
+      : `Sem nota consolidada: recomendado comparar com 2-3 encordoamentos com mais avaliações e especificação técnica mais explícita.`;
 
     return {
       title: payload.title,
@@ -150,7 +244,7 @@ export class StringsSyncService {
       pros,
       attentionPoints,
       verdict,
-      confidence,
+      confidence: signal.confidence,
       generatedAt: new Date().toISOString(),
     };
   }
@@ -163,6 +257,8 @@ export class StringsSyncService {
 
     try {
       const instrumentLabel = this.getTypeLabel(payload.type);
+      const profile = this.inferTechnicalProfile(payload);
+      const signal = this.buildMarketQualitySignal(payload);
       const model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
       const { data } = await axios.post(
@@ -175,13 +271,13 @@ export class StringsSyncService {
             {
               role: 'system',
               content:
-                'Você é um analista de produtos musicais. Gere uma análise curta, clara e honesta em português do Brasil. Responda somente JSON válido com: summary (string), pros (array de 3 strings), attentionPoints (array de 2 ou 3 strings), verdict (string), confidence (baixa|media|alta).',
+                'Você é um especialista técnico em encordoamentos. Gere uma avaliação técnica e detalhada em português do Brasil, considerando: avaliações de usuários (nota e volume), qualidade percebida do encordoamento (material, revestimento, calibre, tensão) e finalidade de uso. Responda somente JSON válido com: summary (string detalhada), pros (array de 3 strings), attentionPoints (array de 3 strings), verdict (string técnica de recomendação), confidence (baixa|media|alta). Não invente dados; quando faltar dado, deixe explícito.',
             },
             {
               role: 'user',
               content: `Produto: ${payload.title}\nInstrumento: ${instrumentLabel}\nPreço: R$ ${payload.price.toFixed(
                 2,
-              )}\nNota média: ${payload.ratingAvg ?? 'sem nota'}\nQuantidade de avaliações: ${payload.ratingCount}`,
+              )}\nNota média: ${payload.ratingAvg ?? 'sem nota'}\nQuantidade de avaliações: ${payload.ratingCount}\nÍndice técnico calculado internamente: ${signal.qualityIndex}/100 (${signal.qualityBand})\nMaterial inferido: ${profile.material}\nRevestimento inferido: ${profile.coating}\nCalibre inferido: ${profile.gauge}\nTensão inferida: ${profile.tension}\nFinalidade sugerida: ${profile.purpose}`,
             },
           ],
         },
