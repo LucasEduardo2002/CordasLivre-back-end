@@ -16,10 +16,24 @@ async function bootstrap() {
     .map((origin) => origin.trim())
     .filter(Boolean);
 
-  const allowedOrigins = envOrigins.length > 0 ? envOrigins : defaultOrigins;
+  const allowedOrigins = new Set(envOrigins.length > 0 ? envOrigins : defaultOrigins);
+
+  const vercelPreviewPattern = /^https:\/\/[a-z0-9-]+\.vercel\.app$/i;
 
   app.enableCors({
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      if (allowedOrigins.has(origin) || vercelPreviewPattern.test(origin)) {
+        callback(null, true);
+        return;
+      }
+
+      callback(new Error(`Origem não permitida por CORS: ${origin}`), false);
+    },
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
