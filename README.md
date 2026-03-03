@@ -25,6 +25,21 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Busca web agregada (CordasLivre)
+
+Endpoint:
+
+`GET /strings/web-search?q=encordoamento%20violao&type=VIOLAO&limit=16`
+
+- Agrega resultados da web sem precisar de catálogo gigante no banco.
+- Usa cache em memória com TTL curto para reduzir custo e latência.
+- Ordena por menor preço quando o valor está disponível.
+
+Variáveis de ambiente opcionais:
+
+- `SERPAPI_KEY`: habilita busca ampla via Google Shopping/SerpAPI.
+- Sem `SERPAPI_KEY`, o endpoint continua funcionando com fallback em Mercado Livre.
+
 ## Project setup
 
 ```bash
