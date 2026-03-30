@@ -1,22 +1,20 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { StringsSyncService } from './strings-sync/strings-sync.service';
 import { WebSearchService } from './web-search.service';
-
 @Controller('strings')
-export class StringsController 
-{
-    constructor(
-      private readonly stringsSyncService: StringsSyncService,
-      private readonly webSearchService: WebSearchService,
-    ) {}
+export class StringsController {
+  constructor(
+    private readonly stringsSyncService: StringsSyncService,
+    private readonly webSearchService: WebSearchService,
+  ) { }
 
-    @Get("update")
-    async update() {
-        return await this.stringsSyncService.syncTopStrings();
-    }
+  @Get("update")
+  async update() {
+    return await this.stringsSyncService.syncTopStrings();
+  }
 
-    @Get()
-    async getAllStrings(@Query('type') type?: string) {
+  @Get()
+  async getAllStrings(@Query('type') type?: string) {
     return await this.stringsSyncService.getTopStrings(type);
   }
 
@@ -46,5 +44,9 @@ export class StringsController
       type,
       limit: Number(limit ?? 20),
     });
+  }
+  @Get('health')
+  async healthCheck() {
+    return await this.stringsSyncService.checkDatabaseHealth();
   }
 }

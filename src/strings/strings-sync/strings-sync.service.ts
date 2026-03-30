@@ -1054,8 +1054,8 @@ export class StringsSyncService {
           const backfillItems =
             uniqueItems.length < 10
               ? Array.from(catalogMap.values())
-                  .filter((item) => !uniqueItems.some((selected) => selected.mlId === item.mlId))
-                  .slice(0, 10 - uniqueItems.length)
+                .filter((item) => !uniqueItems.some((selected) => selected.mlId === item.mlId))
+                .slice(0, 10 - uniqueItems.length)
               : [];
 
           const items = await this.applyRatingAndSort([...uniqueItems, ...backfillItems].slice(0, 10));
@@ -1156,6 +1156,19 @@ export class StringsSyncService {
       this.logger.log('Token renovado!');
     } catch (error) {
       this.logger.error('Falha ao renovar token');
+    }
+  }
+
+  async checkDatabaseHealth() {
+    try {
+      await this.prisma.$queryRaw`SELECT 1`;
+      return {
+        status: 'ok',
+        database: 'active',
+        timestamp: new Date().toISOString()
+      };
+    } catch (error) {
+      return { status: 'error', message: error.message };
     }
   }
 }
