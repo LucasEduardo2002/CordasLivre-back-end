@@ -3,8 +3,10 @@ import axios, { AxiosError } from 'axios';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Cron } from '@nestjs/schedule';
 import { StringType } from '@prisma/client';
+import nodemailer from 'nodemailer';
 
 type MaintenanceAlertLevel = 'OK' | 'SOON' | 'DUE' | 'OVERDUE';
+type MaintenanceAlertTone = 'success' | 'warning' | 'danger';
 
 type CatalogProduct = {
   mlId: string;
@@ -86,6 +88,13 @@ type MaintenanceInput = {
   instrument?: string;
   lastChangeDate?: string;
   studyHoursPerWeek?: number;
+};
+
+type MaintenanceAlertView = {
+  code: MaintenanceAlertLevel;
+  label: string;
+  tone: MaintenanceAlertTone;
+  message: string;
 };
 
 @Injectable()
@@ -457,8 +466,8 @@ export class StringsSyncService {
 
     const explanation =
       level === 'iniciante'
-        ? `Para ${instrument.label}, voce esta no nivel iniciante. Recomendamos calibre ${gaugeByLevel[level]} e tensao ${recommendedTension} para reduzir dor nos dedos e facilitar o estudo. Para o estilo ${styleLabel}, o material ${recommendedMaterial} tende a entregar timbre mais adequado.`
-        : `Para ${instrument.label}, no nivel intermediario, o calibre ${gaugeByLevel[level]} e tensao ${recommendedTension} oferecem mais definicao e controle. No estilo ${styleLabel}, o material ${recommendedMaterial} costuma equilibrar conforto e resposta sonora.`;
+        ? `Para ${instrument.label}, você está no nível iniciante. Recomendamos calibre ${gaugeByLevel[level]} e tensão ${recommendedTension} para reduzir dor nos dedos e facilitar o estudo. Para o estilo ${styleLabel}, o material ${recommendedMaterial} tende a entregar timbre mais adequado.`
+        : `Para ${instrument.label}, no nível intermediário, o calibre ${gaugeByLevel[level]} e a tensão ${recommendedTension} oferecem mais definição e controle. No estilo ${styleLabel}, o material ${recommendedMaterial} costuma equilibrar conforto e resposta sonora.`;
 
     return {
       type: instrument.type,
@@ -469,15 +478,27 @@ export class StringsSyncService {
       recommendedMaterial,
       recommendedTension,
       explanation,
-      nextStep: 'Use os produtos sugeridos como ponto de partida e ajuste calibre/tensao conforme conforto nos primeiros 7 dias.',
+      nextStep: 'Use os produtos sugeridos como ponto de partida e ajuste calibre e tensão conforme o conforto nos primeiros 7 dias.',
       products: selectedProducts,
     };
   }
 
-  private calculateEstimatedLifeDays(studyHoursPerWeek: number): number {
+  private calculateEstimatedLifeDays(type: StringType, studyHoursPerWeek: number): number {
     const clampedHours = Math.max(1, Math.min(60, Math.floor(studyHoursPerWeek)));
-    const estimated = Math.round(130 - clampedHours * 4.2);
-    return Math.max(25, Math.min(150, estimated));
+
+    const lifeProfile: Record<StringType, { baseDays: number; wearRate: number }> = {
+      [StringType.VIOLAO]: { baseDays: 90, wearRate: 2.7 },
+      [StringType.GUITARRA]: { baseDays: 75, wearRate: 2.9 },
+      [StringType.CONTRABAIXO]: { baseDays: 110, wearRate: 2.2 },
+      [StringType.CAVAQUINHO]: { baseDays: 80, wearRate: 2.5 },
+      [StringType.VIOLA_CAIPIRA]: { baseDays: 95, wearRate: 2.4 },
+      [StringType.VIOLINO]: { baseDays: 70, wearRate: 2.8 },
+    };
+
+    const profile = lifeProfile[type] ?? lifeProfile[StringType.VIOLAO];
+    const estimated = Math.round(profile.baseDays - clampedHours * profile.wearRate);
+
+    return Math.max(21, Math.min(150, estimated));
   }
 
   private getStringMaintenanceStore() {
@@ -490,49 +511,108 @@ export class StringsSyncService {
     }).stringMaintenance;
   }
 
-  private buildMaintenanceAlert(nextAlertDate: Date): { level: MaintenanceAlertLevel; message: string } {
+  private buildMaintenanceAlert(nextAlertDate: Date): MaintenanceAlertView {
     const now = new Date();
     const msPerDay = 1000 * 60 * 60 * 24;
     const daysUntil = Math.ceil((nextAlertDate.getTime() - now.getTime()) / msPerDay);
 
     if (daysUntil <= 0) {
       return {
-        level: 'OVERDUE',
-        message: 'Suas cordas ja estao perdendo o brilho. Que tal garantir um set novo?',
+        code: 'OVERDUE',
+        label: 'Troca imediata',
+        tone: 'danger',
+        message: 'Suas cordas já estão perdendo o brilho. Que tal garantir um set novo?',
       };
     }
 
     if (daysUntil <= 7) {
       return {
-        level: 'DUE',
-        message: `Suas cordas estao perto do fim da vida util (aprox. ${daysUntil} dia(s)). Planeje a troca para manter afinacao e conforto.`,
+        code: 'DUE',
+        label: 'Troca urgente',
+        tone: 'danger',
+        message: `Suas cordas estão perto do fim da vida útil (aprox. ${daysUntil} dia(s)). Planeje a troca para manter afinação e conforto.`,
       };
     }
 
     if (daysUntil <= 21) {
       return {
-        level: 'SOON',
+        code: 'SOON',
+        label: 'Atenção',
+        tone: 'warning',
         message: `Seu set entra em janela de troca em breve (${daysUntil} dias).`,
       };
     }
 
     return {
-      level: 'OK',
-      message: `Cordas em bom estado. Proxima janela estimada em ${daysUntil} dias.`,
+      code: 'OK',
+      label: 'Ok por enquanto',
+      tone: 'success',
+      message: `Cordas em bom estado. Próxima janela estimada em ${daysUntil} dias.`,
     };
+  }
+
+  private async sendMaintenanceEmail(params: {
+    email: string;
+    instrumentLabel: string;
+    alert: MaintenanceAlertView;
+    affiliateUrl?: string | null;
+    recommendedProductTitle?: string;
+  }) {
+    const smtpHost = process.env.SMTP_HOST;
+    const smtpPort = Number(process.env.SMTP_PORT ?? 587);
+    const smtpUser = process.env.SMTP_USER;
+    const smtpPass = process.env.SMTP_PASS;
+    const smtpFrom = process.env.SMTP_FROM ?? smtpUser;
+
+    if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
+      this.logger.warn('SMTP não configurado. E-mail de alerta não foi enviado.');
+      return;
+    }
+
+    const transporter = nodemailer.createTransport({
+      host: smtpHost,
+      port: smtpPort,
+      secure: smtpPort === 465,
+      auth: {
+        user: smtpUser,
+        pass: smtpPass,
+      },
+    });
+
+    const affiliateSection = params.affiliateUrl
+      ? `\n\nLink recomendado: ${params.affiliateUrl}`
+      : '';
+
+    const productSection = params.recommendedProductTitle
+      ? `\nRecomendação de referência: ${params.recommendedProductTitle}`
+      : '';
+
+    await transporter.sendMail({
+      from: smtpFrom,
+      to: params.email,
+      subject: `CordasLivre: ${params.alert.label} no seu monitoramento de ${params.instrumentLabel}`,
+      text: [
+        `Seu monitoramento de ${params.instrumentLabel} chegou no estado: ${params.alert.label}.`,
+        params.alert.message,
+        productSection,
+        affiliateSection,
+        '',
+        'Se quiser manter a tocabilidade e a afinação, considere trocar o set o quanto antes.',
+      ].join('\n'),
+    });
   }
 
   async registerStringMaintenance(input: MaintenanceInput) {
     const stringMaintenanceStore = this.getStringMaintenanceStore();
     const email = String(input.email ?? '').trim().toLowerCase();
     if (!email || !email.includes('@')) {
-      throw new BadRequestException('Informe um e-mail valido para registrar o alerta.');
+      throw new BadRequestException('Informe um e-mail válido para registrar o alerta.');
     }
 
     const type = this.resolveStringType(input.instrument);
     const lastChangeDate = new Date(String(input.lastChangeDate ?? ''));
     if (Number.isNaN(lastChangeDate.getTime())) {
-      throw new BadRequestException('Informe uma data de troca valida.');
+      throw new BadRequestException('Informe uma data de troca válida.');
     }
 
     const parsedHours = Number(input.studyHoursPerWeek ?? 0);
@@ -540,7 +620,7 @@ export class StringsSyncService {
       throw new BadRequestException('Informe horas de estudo por semana maiores que zero.');
     }
 
-    const estimatedLifeDays = this.calculateEstimatedLifeDays(parsedHours);
+    const estimatedLifeDays = this.calculateEstimatedLifeDays(type, parsedHours);
     const nextAlertDate = new Date(lastChangeDate.getTime() + estimatedLifeDays * 24 * 60 * 60 * 1000);
     const alert = this.buildMaintenanceAlert(nextAlertDate);
 
@@ -564,7 +644,7 @@ export class StringsSyncService {
         studyHoursPerWeek: Math.floor(parsedHours),
         estimatedLifeDays,
         nextAlertDate,
-        alertLevel: alert.level,
+        alertLevel: alert.code,
         alertMessage: alert.message,
         affiliateUrl: topProduct?.permalink,
       },
@@ -574,11 +654,21 @@ export class StringsSyncService {
         studyHoursPerWeek: Math.floor(parsedHours),
         estimatedLifeDays,
         nextAlertDate,
-        alertLevel: alert.level,
+        alertLevel: alert.code,
         alertMessage: alert.message,
         affiliateUrl: topProduct?.permalink,
       },
     });
+
+    if (alert.code === 'DUE' || alert.code === 'OVERDUE') {
+      await this.sendMaintenanceEmail({
+        email,
+        instrumentLabel: this.getTypeLabel(type),
+        alert,
+        affiliateUrl: maintenance.affiliateUrl,
+        recommendedProductTitle: topProduct?.title,
+      });
+    }
 
     return {
       profile: maintenance,
@@ -614,15 +704,25 @@ export class StringsSyncService {
 
     for (const row of rows) {
       const computed = this.buildMaintenanceAlert(row.nextAlertDate);
-      if (computed.level !== row.alertLevel || computed.message !== (row.alertMessage ?? '')) {
+      if (computed.code !== row.alertLevel || computed.message !== (row.alertMessage ?? '')) {
         await stringMaintenanceStore.update({
           where: { id: row.id },
           data: {
-            alertLevel: computed.level,
+            alertLevel: computed.code,
             alertMessage: computed.message,
-            lastNotifiedAt: computed.level === 'OK' ? row.lastNotifiedAt : new Date(),
+            lastNotifiedAt: computed.code === 'OK' ? row.lastNotifiedAt : new Date(),
           },
         });
+
+        if ((computed.code === 'DUE' || computed.code === 'OVERDUE') && (!row.lastNotifiedAt || Date.now() - row.lastNotifiedAt.getTime() > 1000 * 60 * 60 * 24)) {
+          await this.sendMaintenanceEmail({
+            email: row.userEmail,
+            instrumentLabel: this.getTypeLabel(row.type),
+            alert: computed,
+            affiliateUrl: row.affiliateUrl,
+            recommendedProductTitle: undefined,
+          });
+        }
       }
     }
   }
