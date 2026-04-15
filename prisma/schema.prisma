@@ -37,3 +37,13 @@ model Product {
   // Se quiser evitar duplicidade por categoria:
   // @@unique([mlId, type])
 }
+
+model DictionaryTerm {
+  id          String   @id @default(uuid())
+  term        String   // Ex: "Phosphor Bronze"
+  category    String   // Ex: "Material", "Calibre", "Estrutura"
+  shortDesc   String   // Descrição curta para aparecer num Tooltip
+  fullDesc    String   // Texto completo para a página do Dicionário
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

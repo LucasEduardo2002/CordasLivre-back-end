@@ -4,9 +4,10 @@ import { AppService } from './app.service';
 import { PrismaService } from './prisma/prisma.service';
 import { StringsModule } from './strings/strings.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { DictionaryModule } from './dictionary/dictionary.module';
 
 @Module({
-  imports: [StringsModule, ScheduleModule.forRoot()],
+  imports: [StringsModule, ScheduleModule.forRoot(), DictionaryModule],
   controllers: [AppController],
   providers: [AppService, PrismaService],
 })

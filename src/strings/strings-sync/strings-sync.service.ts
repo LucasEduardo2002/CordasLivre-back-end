@@ -316,7 +316,8 @@ export class StringsSyncService {
         generatedAt: new Date().toISOString(),
       };
     } catch (error) {
-      this.logger.warn(`OpenAI indisponível para avaliação IA: ${error?.message || error}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`OpenAI indisponível para avaliação IA: ${errorMessage}`);
       return null;
     }
   }
@@ -565,7 +566,7 @@ export class StringsSyncService {
         });
         data = response.data;
       } catch (error) {
-        this.logger.warn(`Strict mode: products/search falhou para "${query}": ${error?.message || error}`);
+        this.logger.warn(`Strict mode: products/search falhou para "${query}": ${(error as Error)?.message || error}`);
         continue;
       }
 
@@ -605,7 +606,7 @@ export class StringsSyncService {
 
           collected.set(catalogItem.mlId, catalogItem);
         } catch (error) {
-          this.logger.debug(`Strict mode: falha ao montar item ${productId}: ${error?.message || error}`);
+          this.logger.debug(`Strict mode: falha ao montar item ${productId}: ${(error as Error)?.message || error}`);
         }
       }
     }
@@ -710,7 +711,7 @@ export class StringsSyncService {
           ratingCount: 0,
         });
       } catch (productError) {
-        this.logger.debug(`Falha no fallback highlights para ${entry?.id}: ${productError?.message || productError}`);
+        this.logger.debug(`Falha no fallback highlights para ${entry?.id}: ${(productError as Error)?.message || productError}`);
       }
     }
 
@@ -771,7 +772,7 @@ export class StringsSyncService {
 
         collected.set(catalogItem.mlId, catalogItem);
       } catch (error) {
-        this.logger.debug(`Falha em products/search fallback para ${productId}: ${error?.message || error}`);
+        this.logger.debug(`Falha em products/search fallback para ${productId}: ${(error as Error)?.message || error}`);
       }
     }
 
@@ -877,7 +878,8 @@ export class StringsSyncService {
             const fallbackPayload = JSON.stringify(fallbackError.response?.data ?? {});
             this.logger.warn(`Fallback sem token falhou para "${searchQuery}": status=${fallbackError.response?.status} payload=${fallbackPayload}`);
           } else {
-            this.logger.warn(`Fallback sem token falhou para "${searchQuery}": ${fallbackError?.message || fallbackError}`);
+            const errorMessage = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+            this.logger.warn(`Fallback sem token falhou para "${searchQuery}": ${errorMessage}`);
           }
         }
 
@@ -900,8 +902,9 @@ export class StringsSyncService {
           }
           this.logger.warn(`Fallback via seller items não retornou resultados para "${searchQuery}".`);
         } catch (sellerFallbackError) {
+          const errorMessage = sellerFallbackError instanceof Error ? sellerFallbackError.message : String(sellerFallbackError);
           this.logger.warn(
-            `Fallback via seller items falhou para "${searchQuery}": ${sellerFallbackError?.message || sellerFallbackError}`,
+            `Fallback via seller items falhou para "${searchQuery}": ${errorMessage}`,
           );
         }
 
@@ -933,8 +936,9 @@ export class StringsSyncService {
           }
           this.logger.warn(`Fallback via products/search não retornou resultados para "${searchQuery}".`);
         } catch (productsSearchError) {
+          const errorMessage = productsSearchError instanceof Error ? productsSearchError.message : String(productsSearchError);
           this.logger.warn(
-            `Fallback via products/search falhou para "${searchQuery}": ${productsSearchError?.message || productsSearchError}`,
+            `Fallback via products/search falhou para "${searchQuery}": ${errorMessage}`,
           );
         }
 
@@ -956,12 +960,14 @@ export class StringsSyncService {
           }
           this.logger.warn(`Fallback via highlights não retornou resultados para "${searchQuery}".`);
         } catch (highlightsFallbackError) {
+          const errorMessage = highlightsFallbackError instanceof Error ? highlightsFallbackError.message : String(highlightsFallbackError);
           this.logger.warn(
-            `Fallback via highlights falhou para "${searchQuery}": ${highlightsFallbackError?.message || highlightsFallbackError}`,
+            `Fallback via highlights falhou para "${searchQuery}": ${errorMessage}`,
           );
         }
       }
-      this.logger.warn(`Falha ao buscar "${searchQuery}": ${error?.message || error}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Falha ao buscar "${searchQuery}": ${errorMessage}`);
       if (strictSeed.size > 0) {
         return Array.from(strictSeed.values()).slice(0, 10);
       }
@@ -1096,7 +1102,8 @@ export class StringsSyncService {
           summary.push({ type: category.type, label: category.label, total: rank - 1 });
           this.logger.log(`${category.label}: ${rank - 1} itens.`);
         } catch (err) {
-          this.logger.error(`Erro em ${category.label}: ${err.message}`);
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          this.logger.error(`Erro em ${category.label}: ${errorMessage}`);
           summary.push({ type: category.type, label: category.label, total: 0 });
         }
       }
@@ -1136,7 +1143,8 @@ export class StringsSyncService {
     try {
       await this.syncTopStrings();
     } catch (error) {
-      this.logger.error(`Falha: ${error?.message ?? error}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Falha: ${errorMessage}`);
     }
   }
 
@@ -1168,7 +1176,8 @@ export class StringsSyncService {
         timestamp: new Date().toISOString()
       };
     } catch (error) {
-      return { status: 'error', message: error.message };
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return { status: 'error', message: errorMessage };
     }
   }
 }
