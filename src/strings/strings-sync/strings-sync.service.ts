@@ -4,6 +4,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { Cron } from '@nestjs/schedule';
 import { StringType } from '@prisma/client';
 
+type MaintenanceAlertLevel = 'OK' | 'SOON' | 'DUE' | 'OVERDUE';
+
 type CatalogProduct = {
   mlId: string;
   title: string;
@@ -48,6 +50,42 @@ type MarketQualitySignal = {
   confidence: 'baixa' | 'media' | 'alta';
   ratingText: string;
   sampleText: string;
+};
+
+type ToneAssistantInput = {
+  instrument?: string;
+  level?: string;
+  style?: string;
+};
+
+type ToneAssistantRecommendation = {
+  type: StringType;
+  instrumentLabel: string;
+  levelLabel: string;
+  styleLabel: string;
+  recommendedGauge: string;
+  recommendedMaterial: string;
+  recommendedTension: string;
+  explanation: string;
+  nextStep: string;
+  products: Array<{
+    id: number;
+    title: string;
+    price: number;
+    ratingAvg: number | null;
+    ratingCount: number;
+    permalink: string;
+    thumbnail: string;
+    rank: number;
+  }>;
+};
+
+type MaintenanceInput = {
+  userId?: string;
+  email?: string;
+  instrument?: string;
+  lastChangeDate?: string;
+  studyHoursPerWeek?: number;
 };
 
 @Injectable()
@@ -345,6 +383,248 @@ export class StringsSyncService {
       },
       review,
     };
+  }
+
+  private resolveInstrumentFromWizard(instrument?: string): { type: StringType; label: string } {
+    const normalized = this.normalizeText(instrument ?? 'violao classico');
+
+    if (normalized.includes('guitarra')) return { type: StringType.GUITARRA, label: 'Guitarra' };
+    if (normalized.includes('contrabaixo') || normalized.includes('baixo')) return { type: StringType.CONTRABAIXO, label: 'Contrabaixo' };
+    if (normalized.includes('cavaquinho')) return { type: StringType.CAVAQUINHO, label: 'Cavaquinho' };
+    if (normalized.includes('viola caipira')) return { type: StringType.VIOLA_CAIPIRA, label: 'Viola Caipira' };
+    if (normalized.includes('violino')) return { type: StringType.VIOLINO, label: 'Violino' };
+    return { type: StringType.VIOLAO, label: 'Violao Classico' };
+  }
+
+  private resolveLevel(level?: string): 'iniciante' | 'intermediario' {
+    const normalized = this.normalizeText(level ?? 'iniciante');
+    return normalized.includes('intermedi') ? 'intermediario' : 'iniciante';
+  }
+
+  private resolveStyle(style?: string): 'rock' | 'mpb' | 'sertanejo' {
+    const normalized = this.normalizeText(style ?? 'mpb');
+    if (normalized.includes('rock')) return 'rock';
+    if (normalized.includes('sertanej')) return 'sertanejo';
+    return 'mpb';
+  }
+
+  async recommendToneAssistant(input: ToneAssistantInput): Promise<ToneAssistantRecommendation> {
+    const instrument = this.resolveInstrumentFromWizard(input.instrument);
+    const level = this.resolveLevel(input.level);
+    const style = this.resolveStyle(input.style);
+
+    const gaugeByLevel: Record<'iniciante' | 'intermediario', string> = {
+      iniciante: instrument.type === StringType.GUITARRA ? '0.09 ou 0.10' : '0.10 ou equivalente leve',
+      intermediario: instrument.type === StringType.GUITARRA ? '0.10 ou 0.11' : '0.11 ou equivalente medio',
+    };
+
+    let recommendedMaterial = 'Aco niquelado';
+    if (instrument.type === StringType.VIOLAO && style === 'mpb') recommendedMaterial = 'Nylon';
+    if (instrument.type === StringType.VIOLAO && style === 'sertanejo') recommendedMaterial = 'Aco bronze 80/20';
+    if (instrument.type === StringType.GUITARRA && style === 'rock') recommendedMaterial = 'Aco niquelado';
+    if (instrument.type === StringType.CONTRABAIXO) recommendedMaterial = 'Niquel para contrabaixo';
+    if (instrument.type === StringType.CAVAQUINHO) recommendedMaterial = 'Aco leve para cavaquinho';
+    if (instrument.type === StringType.VIOLA_CAIPIRA) recommendedMaterial = 'Aco para viola caipira';
+    if (instrument.type === StringType.VIOLINO) recommendedMaterial = 'Liga para violino de estudo';
+
+    const recommendedTension = level === 'iniciante' ? 'Leve' : 'Media';
+    const styleLabel = style === 'rock' ? 'Rock' : style === 'sertanejo' ? 'Sertanejo' : 'MPB';
+    const levelLabel = level === 'iniciante' ? 'Iniciante' : 'Intermediario';
+
+    const rows = await this.prisma.product.findMany({
+      where: { type: instrument.type },
+      orderBy: [{ rank: 'asc' }, { id: 'asc' }],
+      take: 20,
+    });
+
+    const normalizedMaterial = this.normalizeText(recommendedMaterial);
+    const materialTokens = normalizedMaterial.split(' ').filter((token) => token.length >= 3);
+    const filtered = rows.filter((row) => {
+      const title = this.normalizeText(row.title);
+      return materialTokens.some((token) => title.includes(token));
+    });
+
+    const selectedProducts = (filtered.length > 0 ? filtered : rows).slice(0, 5).map((item) => ({
+      id: item.id,
+      title: item.title,
+      price: item.price,
+      ratingAvg: item.ratingAvg,
+      ratingCount: item.ratingCount,
+      permalink: item.permalink,
+      thumbnail: item.thumbnail,
+      rank: item.rank,
+    }));
+
+    const explanation =
+      level === 'iniciante'
+        ? `Para ${instrument.label}, voce esta no nivel iniciante. Recomendamos calibre ${gaugeByLevel[level]} e tensao ${recommendedTension} para reduzir dor nos dedos e facilitar o estudo. Para o estilo ${styleLabel}, o material ${recommendedMaterial} tende a entregar timbre mais adequado.`
+        : `Para ${instrument.label}, no nivel intermediario, o calibre ${gaugeByLevel[level]} e tensao ${recommendedTension} oferecem mais definicao e controle. No estilo ${styleLabel}, o material ${recommendedMaterial} costuma equilibrar conforto e resposta sonora.`;
+
+    return {
+      type: instrument.type,
+      instrumentLabel: instrument.label,
+      levelLabel,
+      styleLabel,
+      recommendedGauge: gaugeByLevel[level],
+      recommendedMaterial,
+      recommendedTension,
+      explanation,
+      nextStep: 'Use os produtos sugeridos como ponto de partida e ajuste calibre/tensao conforme conforto nos primeiros 7 dias.',
+      products: selectedProducts,
+    };
+  }
+
+  private calculateEstimatedLifeDays(studyHoursPerWeek: number): number {
+    const clampedHours = Math.max(1, Math.min(60, Math.floor(studyHoursPerWeek)));
+    const estimated = Math.round(130 - clampedHours * 4.2);
+    return Math.max(25, Math.min(150, estimated));
+  }
+
+  private getStringMaintenanceStore() {
+    return (this.prisma as unknown as {
+      stringMaintenance: {
+        upsert: (...args: any[]) => Promise<any>;
+        findMany: (...args: any[]) => Promise<any[]>;
+        update: (...args: any[]) => Promise<any>;
+      };
+    }).stringMaintenance;
+  }
+
+  private buildMaintenanceAlert(nextAlertDate: Date): { level: MaintenanceAlertLevel; message: string } {
+    const now = new Date();
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const daysUntil = Math.ceil((nextAlertDate.getTime() - now.getTime()) / msPerDay);
+
+    if (daysUntil <= 0) {
+      return {
+        level: 'OVERDUE',
+        message: 'Suas cordas ja estao perdendo o brilho. Que tal garantir um set novo?',
+      };
+    }
+
+    if (daysUntil <= 7) {
+      return {
+        level: 'DUE',
+        message: `Suas cordas estao perto do fim da vida util (aprox. ${daysUntil} dia(s)). Planeje a troca para manter afinacao e conforto.`,
+      };
+    }
+
+    if (daysUntil <= 21) {
+      return {
+        level: 'SOON',
+        message: `Seu set entra em janela de troca em breve (${daysUntil} dias).`,
+      };
+    }
+
+    return {
+      level: 'OK',
+      message: `Cordas em bom estado. Proxima janela estimada em ${daysUntil} dias.`,
+    };
+  }
+
+  async registerStringMaintenance(input: MaintenanceInput) {
+    const stringMaintenanceStore = this.getStringMaintenanceStore();
+    const email = String(input.email ?? '').trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      throw new BadRequestException('Informe um e-mail valido para registrar o alerta.');
+    }
+
+    const type = this.resolveStringType(input.instrument);
+    const lastChangeDate = new Date(String(input.lastChangeDate ?? ''));
+    if (Number.isNaN(lastChangeDate.getTime())) {
+      throw new BadRequestException('Informe uma data de troca valida.');
+    }
+
+    const parsedHours = Number(input.studyHoursPerWeek ?? 0);
+    if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
+      throw new BadRequestException('Informe horas de estudo por semana maiores que zero.');
+    }
+
+    const estimatedLifeDays = this.calculateEstimatedLifeDays(parsedHours);
+    const nextAlertDate = new Date(lastChangeDate.getTime() + estimatedLifeDays * 24 * 60 * 60 * 1000);
+    const alert = this.buildMaintenanceAlert(nextAlertDate);
+
+    const topProduct = await this.prisma.product.findFirst({
+      where: { type },
+      orderBy: { rank: 'asc' },
+    });
+
+    const maintenance = await stringMaintenanceStore.upsert({
+      where: {
+        userEmail_type: {
+          userEmail: email,
+          type,
+        },
+      },
+      create: {
+        userId: input.userId,
+        userEmail: email,
+        type,
+        lastChangeDate,
+        studyHoursPerWeek: Math.floor(parsedHours),
+        estimatedLifeDays,
+        nextAlertDate,
+        alertLevel: alert.level,
+        alertMessage: alert.message,
+        affiliateUrl: topProduct?.permalink,
+      },
+      update: {
+        userId: input.userId,
+        lastChangeDate,
+        studyHoursPerWeek: Math.floor(parsedHours),
+        estimatedLifeDays,
+        nextAlertDate,
+        alertLevel: alert.level,
+        alertMessage: alert.message,
+        affiliateUrl: topProduct?.permalink,
+      },
+    });
+
+    return {
+      profile: maintenance,
+      alert,
+    };
+  }
+
+  async getMaintenanceAlerts(email?: string, type?: string) {
+    const stringMaintenanceStore = this.getStringMaintenanceStore();
+    const normalizedEmail = String(email ?? '').trim().toLowerCase();
+    if (!normalizedEmail || !normalizedEmail.includes('@')) {
+      throw new BadRequestException('Informe o e-mail para consultar os alertas.');
+    }
+
+    const whereType = type ? this.resolveStringType(type) : undefined;
+    const rows = await stringMaintenanceStore.findMany({
+      where: {
+        userEmail: normalizedEmail,
+        ...(whereType ? { type: whereType } : {}),
+      },
+      orderBy: { updatedAt: 'desc' },
+    });
+
+    return rows.map((row) => ({
+      ...row,
+      computedAlert: this.buildMaintenanceAlert(row.nextAlertDate),
+    }));
+  }
+
+  async refreshMaintenanceAlerts() {
+    const stringMaintenanceStore = this.getStringMaintenanceStore();
+    const rows = await stringMaintenanceStore.findMany();
+
+    for (const row of rows) {
+      const computed = this.buildMaintenanceAlert(row.nextAlertDate);
+      if (computed.level !== row.alertLevel || computed.message !== (row.alertMessage ?? '')) {
+        await stringMaintenanceStore.update({
+          where: { id: row.id },
+          data: {
+            alertLevel: computed.level,
+            alertMessage: computed.message,
+            lastNotifiedAt: computed.level === 'OK' ? row.lastNotifiedAt : new Date(),
+          },
+        });
+      }
+    }
   }
 
   private buildAffiliatePermalink(baseUrl: string, affiliateTag: string): string {
@@ -1142,6 +1422,7 @@ export class StringsSyncService {
     this.logger.log('Sincronização automática');
     try {
       await this.syncTopStrings();
+      await this.refreshMaintenanceAlerts();
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error(`Falha: ${errorMessage}`);

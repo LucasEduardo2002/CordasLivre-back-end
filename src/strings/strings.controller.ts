@@ -45,6 +45,41 @@ export class StringsController {
       limit: Number(limit ?? 20),
     });
   }
+
+  @Post('tone-assistant')
+  async toneAssistant(
+    @Body()
+    body: {
+      instrument?: string;
+      level?: string;
+      style?: string;
+    },
+  ) {
+    return await this.stringsSyncService.recommendToneAssistant(body);
+  }
+
+  @Post('maintenance/register')
+  async registerMaintenance(
+    @Body()
+    body: {
+      userId?: string;
+      email?: string;
+      instrument?: string;
+      lastChangeDate?: string;
+      studyHoursPerWeek?: number;
+    },
+  ) {
+    return await this.stringsSyncService.registerStringMaintenance(body);
+  }
+
+  @Get('maintenance/alerts')
+  async getMaintenanceAlerts(
+    @Query('email') email?: string,
+    @Query('type') type?: string,
+  ) {
+    return await this.stringsSyncService.getMaintenanceAlerts(email, type);
+  }
+
   @Get('health')
   async healthCheck() {
     return await this.stringsSyncService.checkDatabaseHealth();

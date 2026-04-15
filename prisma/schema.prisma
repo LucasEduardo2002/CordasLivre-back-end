@@ -21,6 +21,13 @@ enum StringType {
   VIOLINO
 }
 
+enum MaintenanceAlertLevel {
+  OK
+  SOON
+  DUE
+  OVERDUE
+}
+
 model Product {
   id        Int        @id @default(autoincrement())
   mlId      String
@@ -46,4 +53,24 @@ model DictionaryTerm {
   fullDesc    String   // Texto completo para a página do Dicionário
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
+}
+
+model StringMaintenance {
+  id                String                @id @default(uuid())
+  userId            String?
+  userEmail         String
+  type              StringType            @default(VIOLAO)
+  lastChangeDate    DateTime
+  studyHoursPerWeek Int
+  estimatedLifeDays Int
+  nextAlertDate     DateTime
+  alertLevel        MaintenanceAlertLevel @default(OK)
+  alertMessage      String?
+  affiliateUrl      String?
+  lastNotifiedAt    DateTime?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  @@unique([userEmail, type])
+  @@index([nextAlertDate, alertLevel])
 }
