@@ -107,6 +107,13 @@ type MaintenanceAlertView = {
   message: string;
 };
 
+type MaintenanceEmailDelivery = {
+  delivered: boolean;
+  provider: 'smtp' | 'ethereal' | 'skipped';
+  messageId?: string;
+  previewUrl?: string;
+};
+
 @Injectable()
 export class StringsSyncService {
   private readonly logger = new Logger(StringsSyncService.name);
@@ -701,7 +708,7 @@ export class StringsSyncService {
     alert: MaintenanceAlertView;
     affiliateUrl?: string | null;
     recommendedProductTitle?: string;
-  }) {
+  }): Promise<MaintenanceEmailDelivery> {
     const smtpHost = process.env.SMTP_HOST;
     const smtpPort = Number(process.env.SMTP_PORT ?? 587);
     const smtpUser = process.env.SMTP_USER;
@@ -709,8 +716,43 @@ export class StringsSyncService {
     const smtpFrom = process.env.SMTP_FROM ?? smtpUser;
 
     if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
-      this.logger.warn('SMTP não configurado. E-mail de alerta não foi enviado.');
-      return;
+      this.logger.warn('SMTP não configurado. Usando Ethereal para teste de envio.');
+
+      const testAccount = await nodemailer.createTestAccount();
+      const transporter = nodemailer.createTransport({
+        host: testAccount.smtp.host,
+        port: testAccount.smtp.port,
+        secure: testAccount.smtp.secure,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass,
+        },
+      });
+
+      const info = await transporter.sendMail({
+        from: 'CordasLivre <no-reply@cordaslivre.local>',
+        to: params.email,
+        subject: `CordasLivre: ${params.alert.label} no seu monitoramento de ${params.instrumentLabel}`,
+        text: [
+          `Seu monitoramento de ${params.instrumentLabel} chegou no estado: ${params.alert.label}.`,
+          params.alert.message,
+          params.recommendedProductTitle ? `Recomendação de referência: ${params.recommendedProductTitle}` : '',
+          params.affiliateUrl ? `Link recomendado: ${params.affiliateUrl}` : '',
+          '',
+          'Se quiser manter a tocabilidade e a afinação, considere trocar o set o quanto antes.',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      });
+
+      const previewUrl = nodemailer.getTestMessageUrl(info);
+
+      return {
+        delivered: true,
+        provider: 'ethereal',
+        messageId: info.messageId,
+        previewUrl: typeof previewUrl === 'string' ? previewUrl : undefined,
+      };
     }
 
     const transporter = nodemailer.createTransport({
@@ -731,7 +773,7 @@ export class StringsSyncService {
       ? `\nRecomendação de referência: ${params.recommendedProductTitle}`
       : '';
 
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: smtpFrom,
       to: params.email,
       subject: `CordasLivre: ${params.alert.label} no seu monitoramento de ${params.instrumentLabel}`,
@@ -744,6 +786,12 @@ export class StringsSyncService {
         'Se quiser manter a tocabilidade e a afinação, considere trocar o set o quanto antes.',
       ].join('\n'),
     });
+
+    return {
+      delivered: true,
+      provider: 'smtp',
+      messageId: info.messageId,
+    };
   }
 
   async registerStringMaintenance(input: MaintenanceInput) {
@@ -804,8 +852,10 @@ export class StringsSyncService {
       },
     });
 
+    let emailDelivery: MaintenanceEmailDelivery | null = null;
+
     if (alert.code === 'DUE' || alert.code === 'OVERDUE') {
-      await this.sendMaintenanceEmail({
+      emailDelivery = await this.sendMaintenanceEmail({
         email,
         instrumentLabel: this.getTypeLabel(type),
         alert,
@@ -817,6 +867,7 @@ export class StringsSyncService {
     return {
       profile: maintenance,
       alert,
+      emailDelivery: emailDelivery ?? { delivered: false, provider: 'skipped' },
     };
   }
 
