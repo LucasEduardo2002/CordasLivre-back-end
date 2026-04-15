@@ -3,7 +3,6 @@ import axios, { AxiosError } from 'axios';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Cron } from '@nestjs/schedule';
 import { StringType } from '@prisma/client';
-import nodemailer from 'nodemailer';
 
 type MaintenanceAlertLevel = 'OK' | 'SOON' | 'DUE' | 'OVERDUE';
 type MaintenanceAlertTone = 'success' | 'warning' | 'danger';
@@ -105,13 +104,6 @@ type MaintenanceAlertView = {
   label: string;
   tone: MaintenanceAlertTone;
   message: string;
-};
-
-type MaintenanceEmailDelivery = {
-  delivered: boolean;
-  provider: 'smtp' | 'ethereal' | 'skipped';
-  messageId?: string;
-  previewUrl?: string;
 };
 
 @Injectable()
@@ -702,98 +694,6 @@ export class StringsSyncService {
     };
   }
 
-  private async sendMaintenanceEmail(params: {
-    email: string;
-    instrumentLabel: string;
-    alert: MaintenanceAlertView;
-    affiliateUrl?: string | null;
-    recommendedProductTitle?: string;
-  }): Promise<MaintenanceEmailDelivery> {
-    const smtpHost = process.env.SMTP_HOST;
-    const smtpPort = Number(process.env.SMTP_PORT ?? 587);
-    const smtpUser = process.env.SMTP_USER;
-    const smtpPass = process.env.SMTP_PASS;
-    const smtpFrom = process.env.SMTP_FROM ?? smtpUser;
-
-    if (!smtpHost || !smtpUser || !smtpPass || !smtpFrom) {
-      this.logger.warn('SMTP não configurado. Usando Ethereal para teste de envio.');
-
-      const testAccount = await nodemailer.createTestAccount();
-      const transporter = nodemailer.createTransport({
-        host: testAccount.smtp.host,
-        port: testAccount.smtp.port,
-        secure: testAccount.smtp.secure,
-        auth: {
-          user: testAccount.user,
-          pass: testAccount.pass,
-        },
-      });
-
-      const info = await transporter.sendMail({
-        from: 'CordasLivre <no-reply@cordaslivre.local>',
-        to: params.email,
-        subject: `CordasLivre: ${params.alert.label} no seu monitoramento de ${params.instrumentLabel}`,
-        text: [
-          `Seu monitoramento de ${params.instrumentLabel} chegou no estado: ${params.alert.label}.`,
-          params.alert.message,
-          params.recommendedProductTitle ? `Recomendação de referência: ${params.recommendedProductTitle}` : '',
-          params.affiliateUrl ? `Link recomendado: ${params.affiliateUrl}` : '',
-          '',
-          'Se quiser manter a tocabilidade e a afinação, considere trocar o set o quanto antes.',
-        ]
-          .filter(Boolean)
-          .join('\n'),
-      });
-
-      const previewUrl = nodemailer.getTestMessageUrl(info);
-
-      return {
-        delivered: true,
-        provider: 'ethereal',
-        messageId: info.messageId,
-        previewUrl: typeof previewUrl === 'string' ? previewUrl : undefined,
-      };
-    }
-
-    const transporter = nodemailer.createTransport({
-      host: smtpHost,
-      port: smtpPort,
-      secure: smtpPort === 465,
-      auth: {
-        user: smtpUser,
-        pass: smtpPass,
-      },
-    });
-
-    const affiliateSection = params.affiliateUrl
-      ? `\n\nLink recomendado: ${params.affiliateUrl}`
-      : '';
-
-    const productSection = params.recommendedProductTitle
-      ? `\nRecomendação de referência: ${params.recommendedProductTitle}`
-      : '';
-
-    const info = await transporter.sendMail({
-      from: smtpFrom,
-      to: params.email,
-      subject: `CordasLivre: ${params.alert.label} no seu monitoramento de ${params.instrumentLabel}`,
-      text: [
-        `Seu monitoramento de ${params.instrumentLabel} chegou no estado: ${params.alert.label}.`,
-        params.alert.message,
-        productSection,
-        affiliateSection,
-        '',
-        'Se quiser manter a tocabilidade e a afinação, considere trocar o set o quanto antes.',
-      ].join('\n'),
-    });
-
-    return {
-      delivered: true,
-      provider: 'smtp',
-      messageId: info.messageId,
-    };
-  }
-
   async registerStringMaintenance(input: MaintenanceInput) {
     const stringMaintenanceStore = this.getStringMaintenanceStore();
     const email = String(input.email ?? '').trim().toLowerCase();
@@ -852,22 +752,9 @@ export class StringsSyncService {
       },
     });
 
-    let emailDelivery: MaintenanceEmailDelivery | null = null;
-
-    if (alert.code === 'DUE' || alert.code === 'OVERDUE') {
-      emailDelivery = await this.sendMaintenanceEmail({
-        email,
-        instrumentLabel: this.getTypeLabel(type),
-        alert,
-        affiliateUrl: maintenance.affiliateUrl,
-        recommendedProductTitle: topProduct?.title,
-      });
-    }
-
     return {
       profile: maintenance,
       alert,
-      emailDelivery: emailDelivery ?? { delivered: false, provider: 'skipped' },
     };
   }
 
@@ -908,16 +795,6 @@ export class StringsSyncService {
             lastNotifiedAt: computed.code === 'OK' ? row.lastNotifiedAt : new Date(),
           },
         });
-
-        if ((computed.code === 'DUE' || computed.code === 'OVERDUE') && (!row.lastNotifiedAt || Date.now() - row.lastNotifiedAt.getTime() > 1000 * 60 * 60 * 24)) {
-          await this.sendMaintenanceEmail({
-            email: row.userEmail,
-            instrumentLabel: this.getTypeLabel(row.type),
-            alert: computed,
-            affiliateUrl: row.affiliateUrl,
-            recommendedProductTitle: undefined,
-          });
-        }
       }
     }
   }
