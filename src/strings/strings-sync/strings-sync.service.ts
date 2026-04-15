@@ -65,9 +65,19 @@ type ToneAssistantRecommendation = {
   instrumentLabel: string;
   levelLabel: string;
   styleLabel: string;
+  compatibilityScore: number;
+  compatibilityLabel: 'Excelente' | 'Boa' | 'Ajustável';
+  compatibilityTone: 'success' | 'warning';
   recommendedGauge: string;
   recommendedMaterial: string;
   recommendedTension: string;
+  confidence: 'alta' | 'media';
+  decisionFactors: string[];
+  referenceSources: Array<{
+    name: string;
+    url: string;
+    note: string;
+  }>;
   explanation: string;
   nextStep: string;
   products: Array<{
@@ -402,17 +412,21 @@ export class StringsSyncService {
     if (normalized.includes('cavaquinho')) return { type: StringType.CAVAQUINHO, label: 'Cavaquinho' };
     if (normalized.includes('viola caipira')) return { type: StringType.VIOLA_CAIPIRA, label: 'Viola Caipira' };
     if (normalized.includes('violino')) return { type: StringType.VIOLINO, label: 'Violino' };
-    return { type: StringType.VIOLAO, label: 'Violao Classico' };
+    return { type: StringType.VIOLAO, label: 'Violão Clássico' };
   }
 
-  private resolveLevel(level?: string): 'iniciante' | 'intermediario' {
+  private resolveLevel(level?: string): 'iniciante' | 'intermediario' | 'avancado' {
     const normalized = this.normalizeText(level ?? 'iniciante');
-    return normalized.includes('intermedi') ? 'intermediario' : 'iniciante';
+    if (normalized.includes('avanc')) return 'avancado';
+    if (normalized.includes('intermedi')) return 'intermediario';
+    return 'iniciante';
   }
 
-  private resolveStyle(style?: string): 'rock' | 'mpb' | 'sertanejo' {
+  private resolveStyle(style?: string): 'rock' | 'mpb' | 'sertanejo' | 'jazz' | 'pop' {
     const normalized = this.normalizeText(style ?? 'mpb');
     if (normalized.includes('rock')) return 'rock';
+    if (normalized.includes('jazz')) return 'jazz';
+    if (normalized.includes('pop')) return 'pop';
     if (normalized.includes('sertanej')) return 'sertanejo';
     return 'mpb';
   }
@@ -422,23 +436,98 @@ export class StringsSyncService {
     const level = this.resolveLevel(input.level);
     const style = this.resolveStyle(input.style);
 
-    const gaugeByLevel: Record<'iniciante' | 'intermediario', string> = {
-      iniciante: instrument.type === StringType.GUITARRA ? '0.09 ou 0.10' : '0.10 ou equivalente leve',
-      intermediario: instrument.type === StringType.GUITARRA ? '0.10 ou 0.11' : '0.11 ou equivalente medio',
+    const gaugeProfileByType: Record<StringType, Record<'iniciante' | 'intermediario' | 'avancado', string>> = {
+      [StringType.VIOLAO]: {
+        iniciante: '0.10-0.47 (aço) ou tensão baixa/média-baixa (nylon)',
+        intermediario: '0.11-0.52 (aço) ou tensão média (nylon)',
+        avancado: '0.12-0.53 (aço) ou tensão média/alta (nylon)',
+      },
+      [StringType.GUITARRA]: {
+        iniciante: '0.09-0.42 ou 0.10-0.46',
+        intermediario: '0.10-0.46 ou 0.10-0.52',
+        avancado: '0.10-0.52 ou 0.11-0.49',
+      },
+      [StringType.CONTRABAIXO]: {
+        iniciante: '0.40-0.100',
+        intermediario: '0.45-0.105',
+        avancado: '0.45-0.110',
+      },
+      [StringType.CAVAQUINHO]: {
+        iniciante: 'calibre leve padrão para estudo',
+        intermediario: 'calibre médio para equilíbrio entre brilho e conforto',
+        avancado: 'calibre médio/alto para projeção mais forte',
+      },
+      [StringType.VIOLA_CAIPIRA]: {
+        iniciante: 'jogo leve para menor esforço na mão esquerda',
+        intermediario: 'jogo médio para melhor projeção',
+        avancado: 'jogo médio/alto para afinação firme e ataque forte',
+      },
+      [StringType.VIOLINO]: {
+        iniciante: 'jogo de estudo com tensão baixa/média',
+        intermediario: 'jogo de tensão média',
+        avancado: 'jogo de tensão média/alta conforme resposta do instrumento',
+      },
     };
 
-    let recommendedMaterial = 'Aco niquelado';
-    if (instrument.type === StringType.VIOLAO && style === 'mpb') recommendedMaterial = 'Nylon';
-    if (instrument.type === StringType.VIOLAO && style === 'sertanejo') recommendedMaterial = 'Aco bronze 80/20';
-    if (instrument.type === StringType.GUITARRA && style === 'rock') recommendedMaterial = 'Aco niquelado';
-    if (instrument.type === StringType.CONTRABAIXO) recommendedMaterial = 'Niquel para contrabaixo';
-    if (instrument.type === StringType.CAVAQUINHO) recommendedMaterial = 'Aco leve para cavaquinho';
-    if (instrument.type === StringType.VIOLA_CAIPIRA) recommendedMaterial = 'Aco para viola caipira';
-    if (instrument.type === StringType.VIOLINO) recommendedMaterial = 'Liga para violino de estudo';
+    const recommendedGauge = gaugeProfileByType[instrument.type]?.[level] ?? gaugeProfileByType[StringType.VIOLAO].iniciante;
 
-    const recommendedTension = level === 'iniciante' ? 'Leve' : 'Media';
-    const styleLabel = style === 'rock' ? 'Rock' : style === 'sertanejo' ? 'Sertanejo' : 'MPB';
-    const levelLabel = level === 'iniciante' ? 'Iniciante' : 'Intermediario';
+    const materialByTypeAndStyle: Record<StringType, Record<'rock' | 'mpb' | 'sertanejo' | 'jazz' | 'pop', string>> = {
+      [StringType.VIOLAO]: {
+        mpb: 'Nylon (violão clássico) ou fósforo bronze (violão aço)',
+        sertanejo: 'Aço bronze 80/20 ou fósforo bronze para ataque mais presente',
+        rock: 'Aço fósforo bronze para mais brilho e projeção',
+        jazz: 'Nylon de tensão média para timbre mais encorpado',
+        pop: 'Fósforo bronze para equilíbrio entre brilho e corpo',
+      },
+      [StringType.GUITARRA]: {
+        rock: 'Aço niquelado (nickel wound)',
+        mpb: 'Aço niquelado com tensão média para dinâmica suave',
+        sertanejo: 'Aço niquelado para brilho com bom sustain',
+        jazz: 'Níquel puro ou aço niquelado para timbre mais quente',
+        pop: 'Aço niquelado para versatilidade em base e fraseado',
+      },
+      [StringType.CONTRABAIXO]: {
+        rock: 'Níquel para ataque definido; aço inox para mais brilho',
+        mpb: 'Níquel para grave encorpado e toque confortável',
+        sertanejo: 'Níquel com tensão média para consistência no palco',
+        jazz: 'Flatwound (som aveludado) ou níquel roundwound',
+        pop: 'Níquel roundwound para equilíbrio entre punch e conforto',
+      },
+      [StringType.CAVAQUINHO]: {
+        rock: 'Aço de tensão média para projeção',
+        mpb: 'Aço leve/médio para equilíbrio entre brilho e conforto',
+        sertanejo: 'Aço com ataque mais marcado',
+        jazz: 'Aço de tensão média para articulação limpa',
+        pop: 'Aço leve para fraseado confortável',
+      },
+      [StringType.VIOLA_CAIPIRA]: {
+        rock: 'Aço para resposta firme',
+        mpb: 'Aço de tensão média para timbre equilibrado',
+        sertanejo: 'Aço com boa projeção e afinação estável',
+        jazz: 'Aço tensão média para controle dinâmico',
+        pop: 'Aço médio para versatilidade',
+      },
+      [StringType.VIOLINO]: {
+        rock: 'Núcleo sintético com tensão média para estabilidade',
+        mpb: 'Núcleo sintético para timbre equilibrado',
+        sertanejo: 'Núcleo sintético com boa projeção',
+        jazz: 'Núcleo sintético ou aço conforme articulação desejada',
+        pop: 'Núcleo sintético de resposta rápida',
+      },
+    };
+
+    const recommendedMaterial = materialByTypeAndStyle[instrument.type]?.[style] ?? materialByTypeAndStyle[StringType.VIOLAO].mpb;
+
+    const tensionByLevel: Record<'iniciante' | 'intermediario' | 'avancado', string> = {
+      iniciante: 'Baixa a média-baixa',
+      intermediario: 'Média',
+      avancado: 'Média a média-alta',
+    };
+    const recommendedTension = tensionByLevel[level];
+
+    const styleLabel =
+      style === 'rock' ? 'Rock' : style === 'sertanejo' ? 'Sertanejo' : style === 'jazz' ? 'Jazz' : style === 'pop' ? 'Pop' : 'MPB';
+    const levelLabel = level === 'iniciante' ? 'Iniciante' : level === 'intermediario' ? 'Intermediário' : 'Avançado';
 
     const rows = await this.prisma.product.findMany({
       where: { type: instrument.type },
@@ -464,21 +553,76 @@ export class StringsSyncService {
       rank: item.rank,
     }));
 
+    const commonStylesByType: Record<StringType, Array<'rock' | 'mpb' | 'sertanejo' | 'jazz' | 'pop'>> = {
+      [StringType.VIOLAO]: ['mpb', 'sertanejo', 'pop'],
+      [StringType.GUITARRA]: ['rock', 'jazz', 'pop'],
+      [StringType.CONTRABAIXO]: ['rock', 'jazz', 'pop', 'mpb'],
+      [StringType.CAVAQUINHO]: ['mpb', 'sertanejo'],
+      [StringType.VIOLA_CAIPIRA]: ['sertanejo', 'mpb'],
+      [StringType.VIOLINO]: ['jazz', 'pop', 'mpb'],
+    };
+    const isCommonStyle = (commonStylesByType[instrument.type] ?? []).includes(style);
+
+    const confidence: 'alta' | 'media' =
+      (instrument.type === StringType.GUITARRA || instrument.type === StringType.CONTRABAIXO || instrument.type === StringType.VIOLAO) && level !== 'avancado'
+        ? 'alta'
+        : 'media';
+
+    let compatibilityScore = 70;
+    compatibilityScore += confidence === 'alta' ? 12 : 7;
+    compatibilityScore += level === 'iniciante' ? 6 : level === 'intermediario' ? 4 : 2;
+    compatibilityScore += isCommonStyle ? 5 : 2;
+    compatibilityScore += filtered.length > 0 ? 4 : 1;
+    compatibilityScore = Math.max(65, Math.min(96, compatibilityScore));
+
+    const compatibilityLabel: ToneAssistantRecommendation['compatibilityLabel'] =
+      compatibilityScore >= 88 ? 'Excelente' : compatibilityScore >= 78 ? 'Boa' : 'Ajustável';
+    const compatibilityTone: ToneAssistantRecommendation['compatibilityTone'] = compatibilityScore >= 78 ? 'success' : 'warning';
+
+    const decisionFactors = [
+      `Instrumento selecionado: ${instrument.label}.`,
+      `Nível informado: ${levelLabel}, com foco de tensão ${recommendedTension.toLowerCase()}.`,
+      `Estilo principal: ${styleLabel}, priorizando material ${recommendedMaterial.toLowerCase()}.`,
+      'Referência técnica de tensão: variações de calibre, escala e afinação alteram tocabilidade e resposta sonora.',
+    ];
+
+    const referenceSources: ToneAssistantRecommendation['referenceSources'] = [
+      {
+        name: "D'Addario String Tension Pro 2.0",
+        url: 'https://www.daddario.com/pages/string-tension-pro-string-tension-calculator/',
+        note: 'Base técnica para relação entre calibre, afinação, escala e tensão percebida.',
+      },
+      {
+        name: 'Ernie Ball String Explorer / Slinky Nickel Wound',
+        url: 'https://www.ernieball.com/string-explorer',
+        note: 'Faixas de calibres comerciais amplamente utilizadas em guitarra e contrabaixo.',
+      },
+    ];
+
     const explanation =
       level === 'iniciante'
-        ? `Para ${instrument.label}, você está no nível iniciante. Recomendamos calibre ${gaugeByLevel[level]} e tensão ${recommendedTension} para reduzir dor nos dedos e facilitar o estudo. Para o estilo ${styleLabel}, o material ${recommendedMaterial} tende a entregar timbre mais adequado.`
-        : `Para ${instrument.label}, no nível intermediário, o calibre ${gaugeByLevel[level]} e a tensão ${recommendedTension} oferecem mais definição e controle. No estilo ${styleLabel}, o material ${recommendedMaterial} costuma equilibrar conforto e resposta sonora.`;
+        ? `Para ${instrument.label}, no nível iniciante, recomendamos ${recommendedGauge} com tensão ${recommendedTension.toLowerCase()} para facilitar a tocabilidade e reduzir fadiga nos dedos. No estilo ${styleLabel}, ${recommendedMaterial.toLowerCase()} tende a entregar melhor equilíbrio entre timbre e conforto.`
+        : level === 'intermediario'
+          ? `Para ${instrument.label}, no nível intermediário, o conjunto ${recommendedGauge} com tensão ${recommendedTension.toLowerCase()} costuma oferecer mais definição sem sacrificar conforto. Para ${styleLabel}, ${recommendedMaterial.toLowerCase()} mantém versatilidade e boa resposta.`
+          : `Para ${instrument.label}, no nível avançado, recomendamos ${recommendedGauge} com tensão ${recommendedTension.toLowerCase()} para maior controle dinâmico e estabilidade. No estilo ${styleLabel}, ${recommendedMaterial.toLowerCase()} favorece projeção e precisão tímbrica.`;
 
     return {
       type: instrument.type,
       instrumentLabel: instrument.label,
       levelLabel,
       styleLabel,
-      recommendedGauge: gaugeByLevel[level],
+      compatibilityScore,
+      compatibilityLabel,
+      compatibilityTone,
+      recommendedGauge,
       recommendedMaterial,
       recommendedTension,
+      confidence,
+      decisionFactors,
+      referenceSources,
       explanation,
-      nextStep: 'Use os produtos sugeridos como ponto de partida e ajuste calibre e tensão conforme o conforto nos primeiros 7 dias.',
+      nextStep:
+        'Use os produtos sugeridos como ponto de partida e valide conforto, afinação e resposta dinâmica por 7 dias antes de fixar o calibre definitivo.',
       products: selectedProducts,
     };
   }
