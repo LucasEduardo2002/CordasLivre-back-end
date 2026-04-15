@@ -12,7 +12,7 @@ export class DictionaryService {
   }
 
   async findByTerm(term: string) {
-    return this.prisma.dictionaryTerm.findUnique({
+    return this.prisma.dictionaryTerm.findFirst({
       where: { term },
     });
   }
