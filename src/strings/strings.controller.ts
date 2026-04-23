@@ -65,6 +65,7 @@ export class StringsController {
       userId?: string;
       email?: string;
       instrument?: string;
+      stringMaterial?: string;
       lastChangeDate?: string;
       studyHoursPerWeek?: number;
     },

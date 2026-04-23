@@ -95,8 +95,24 @@ type MaintenanceInput = {
   userId?: string;
   email?: string;
   instrument?: string;
+  stringMaterial?: string;
   lastChangeDate?: string;
   studyHoursPerWeek?: number;
+};
+
+type StringMaterial =
+  | 'NYLON'
+  | 'ACO_NIQUEL'
+  | 'ACO_INOX'
+  | 'BRONZE_8020'
+  | 'PHOSPHOR_BRONZE'
+  | 'REVESTIDA'
+  | 'SINTETICA'
+  | 'OUTRO';
+
+type MaintenanceLifespanProfile = {
+  baseDays: number;
+  wearRate: number;
 };
 
 type MaintenanceAlertView = {
@@ -110,6 +126,45 @@ type MaintenanceAlertView = {
 export class StringsSyncService {
   private readonly logger = new Logger(StringsSyncService.name);
   private readonly LEGACY_CATEGORY_ID = 'MLB278076';
+  private readonly maintenanceModelVersion = '2026.04-audit-v1';
+  private readonly maintenanceModelReferences = [
+    {
+      name: "D'Addario String Tension Pro",
+      url: 'https://www.daddario.com/pages/string-tension-pro-string-tension-calculator/',
+      note: 'Referência para relação entre calibre, afinação, escala e variação de tensão percebida.',
+    },
+    {
+      name: 'Ernie Ball String Explorer',
+      url: 'https://www.ernieball.com/string-explorer',
+      note: 'Referência de faixas de calibres e conjuntos comerciais usados no mercado.',
+    },
+    {
+      name: 'Elixir Strings - Care & String Life',
+      url: 'https://www.elixirstrings.com/tips',
+      note: 'Referência prática sobre desgaste por uso, suor e manutenção do encordoamento.',
+    },
+  ] as const;
+  private readonly defaultMaintenanceLifeProfileByType: Record<StringType, MaintenanceLifespanProfile> = {
+    [StringType.VIOLAO]: { baseDays: 90, wearRate: 2.7 },
+    [StringType.GUITARRA]: { baseDays: 75, wearRate: 2.9 },
+    [StringType.CONTRABAIXO]: { baseDays: 110, wearRate: 2.2 },
+    [StringType.CAVAQUINHO]: { baseDays: 80, wearRate: 2.5 },
+    [StringType.UKULELE]: { baseDays: 85, wearRate: 2.3 },
+    [StringType.VIOLA_CAIPIRA]: { baseDays: 95, wearRate: 2.4 },
+    [StringType.VIOLINO]: { baseDays: 70, wearRate: 2.8 },
+  };
+  private readonly defaultMaterialFactorByType: Record<StringMaterial, number> = {
+    NYLON: 1.08,
+    ACO_NIQUEL: 1,
+    ACO_INOX: 1.12,
+    BRONZE_8020: 0.95,
+    PHOSPHOR_BRONZE: 1,
+    REVESTIDA: 1.25,
+    SINTETICA: 1.1,
+    OUTRO: 1,
+  };
+  private readonly maintenanceLifeProfileByType = this.loadMaintenanceLifeProfileByType();
+  private readonly materialFactorByType = this.loadMaterialFactorByType();
   private syncInFlight: Promise<{ status: string; total: number; categories: Array<{ type: StringType; label: string; total: number }> }> | null = null;
   private readonly itemRatingsCache = new Map<string, { ratingAvg: number | null; ratingCount: number }>();
   private readonly stringCategories = [
@@ -643,23 +698,86 @@ export class StringsSyncService {
     };
   }
 
-  private calculateEstimatedLifeDays(type: StringType, studyHoursPerWeek: number): number {
+  private resolveStringMaterial(material?: string): StringMaterial {
+    if (!material) return 'OUTRO';
+
+    const normalized = this.normalizeText(material);
+    if (normalized.includes('revest') || normalized.includes('coated')) return 'REVESTIDA';
+    if (normalized.includes('nylon') || normalized.includes('nailon')) return 'NYLON';
+    if (normalized.includes('inox')) return 'ACO_INOX';
+    if (normalized.includes('niquel') || normalized.includes('nickel')) return 'ACO_NIQUEL';
+    if (normalized.includes('phosphor') || normalized.includes('fosforo')) return 'PHOSPHOR_BRONZE';
+    if (normalized.includes('80/20') || (normalized.includes('bronze') && normalized.includes('8020'))) return 'BRONZE_8020';
+    if (normalized.includes('sintetic')) return 'SINTETICA';
+
+    return 'OUTRO';
+  }
+
+  private calculateEstimatedLifeDaysByModel(type: StringType, studyHoursPerWeek: number, material: StringMaterial): number {
     const clampedHours = Math.max(1, Math.min(60, Math.floor(studyHoursPerWeek)));
+    const profile = this.maintenanceLifeProfileByType[type] ?? this.defaultMaintenanceLifeProfileByType[StringType.VIOLAO];
+    const materialFactor = this.materialFactorByType[material] ?? 1;
 
-    const lifeProfile: Record<StringType, { baseDays: number; wearRate: number }> = {
-      [StringType.VIOLAO]: { baseDays: 90, wearRate: 2.7 },
-      [StringType.GUITARRA]: { baseDays: 75, wearRate: 2.9 },
-      [StringType.CONTRABAIXO]: { baseDays: 110, wearRate: 2.2 },
-      [StringType.CAVAQUINHO]: { baseDays: 80, wearRate: 2.5 },
-      [StringType.UKULELE]: { baseDays: 85, wearRate: 2.3 },
-      [StringType.VIOLA_CAIPIRA]: { baseDays: 95, wearRate: 2.4 },
-      [StringType.VIOLINO]: { baseDays: 70, wearRate: 2.8 },
-    };
-
-    const profile = lifeProfile[type] ?? lifeProfile[StringType.VIOLAO];
-    const estimated = Math.round(profile.baseDays - clampedHours * profile.wearRate);
-
+    const estimated = Math.round((profile.baseDays - clampedHours * profile.wearRate) * materialFactor);
     return Math.max(21, Math.min(150, estimated));
+  }
+
+  private parseJsonConfigOrFallback<T>(rawValue: string | undefined, fallback: T, configName: string): T {
+    if (!rawValue || !rawValue.trim()) {
+      return fallback;
+    }
+
+    try {
+      const parsed = JSON.parse(rawValue);
+      return { ...fallback, ...(parsed as object) } as T;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`Config ${configName} inválida em JSON. Usando fallback interno. Motivo: ${errorMessage}`);
+      return fallback;
+    }
+  }
+
+  private loadMaintenanceLifeProfileByType(): Record<StringType, MaintenanceLifespanProfile> {
+    return this.parseJsonConfigOrFallback<Record<StringType, MaintenanceLifespanProfile>>(
+      process.env.STRING_LIFESPAN_PROFILES_JSON,
+      this.defaultMaintenanceLifeProfileByType,
+      'STRING_LIFESPAN_PROFILES_JSON',
+    );
+  }
+
+  private loadMaterialFactorByType(): Record<StringMaterial, number> {
+    return this.parseJsonConfigOrFallback<Record<StringMaterial, number>>(
+      process.env.STRING_LIFESPAN_MATERIAL_FACTORS_JSON,
+      this.defaultMaterialFactorByType,
+      'STRING_LIFESPAN_MATERIAL_FACTORS_JSON',
+    );
+  }
+
+  private getMaintenanceModelMetadata(type: StringType, material: StringMaterial, studyHoursPerWeek: number) {
+    const clampedHours = Math.max(1, Math.min(60, Math.floor(studyHoursPerWeek)));
+    const profile = this.maintenanceLifeProfileByType[type] ?? this.defaultMaintenanceLifeProfileByType[StringType.VIOLAO];
+    const materialFactor = this.materialFactorByType[material] ?? 1;
+
+    return {
+      version: this.maintenanceModelVersion,
+      equation: 'estimatedLifeDays = clamp(21, 150, round((baseDays - clampedHours * wearRate) * materialFactor))',
+      inputs: {
+        type,
+        material,
+        studyHoursPerWeek,
+        clampedHours,
+      },
+      parameters: {
+        baseDays: profile.baseDays,
+        wearRate: profile.wearRate,
+        materialFactor,
+      },
+      references: this.maintenanceModelReferences,
+      configSources: {
+        profileByType: process.env.STRING_LIFESPAN_PROFILES_JSON ? 'env.STRING_LIFESPAN_PROFILES_JSON' : 'internal-default',
+        materialFactors: process.env.STRING_LIFESPAN_MATERIAL_FACTORS_JSON ? 'env.STRING_LIFESPAN_MATERIAL_FACTORS_JSON' : 'internal-default',
+      },
+    };
   }
 
   private getStringMaintenanceStore() {
@@ -730,7 +848,8 @@ export class StringsSyncService {
       throw new BadRequestException('Informe horas de estudo por semana maiores que zero.');
     }
 
-    const estimatedLifeDays = this.calculateEstimatedLifeDays(type, parsedHours);
+    const material = this.resolveStringMaterial(input.stringMaterial);
+    const estimatedLifeDays = this.calculateEstimatedLifeDaysByModel(type, parsedHours, material);
     const nextAlertDate = new Date(lastChangeDate.getTime() + estimatedLifeDays * 24 * 60 * 60 * 1000);
     const alert = this.buildMaintenanceAlert(nextAlertDate);
 
@@ -773,6 +892,7 @@ export class StringsSyncService {
     return {
       profile: maintenance,
       alert,
+      model: this.getMaintenanceModelMetadata(type, material, parsedHours),
     };
   }
 

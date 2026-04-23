@@ -71,6 +71,23 @@ Variáveis de ambiente opcionais:
 - `SERPAPI_KEY`: habilita busca ampla via Google Shopping/SerpAPI.
 - Sem `SERPAPI_KEY`, o endpoint continua funcionando com fallback em Mercado Livre.
 
+## Modelo de vida util auditavel (cordas)
+
+O calculo de vida util das cordas agora possui:
+
+- versao de modelo retornada pela API de manutencao;
+- parametros auditaveis (baseDays, wearRate, materialFactor);
+- calibracao por variavel de ambiente sem alterar codigo.
+
+Documentacao detalhada:
+
+- `docs/string-lifespan-methodology.md`
+
+Variaveis de ambiente opcionais para calibracao:
+
+- `STRING_LIFESPAN_PROFILES_JSON`
+- `STRING_LIFESPAN_MATERIAL_FACTORS_JSON`
+
 ## Project setup
 
 ```bash
