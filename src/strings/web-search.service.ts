@@ -41,6 +41,7 @@ export class WebSearchService {
       [StringType.GUITARRA]: 'guitarra',
       [StringType.CONTRABAIXO]: 'contrabaixo',
       [StringType.CAVAQUINHO]: 'cavaquinho',
+      [StringType.UKULELE]: 'ukulele',
       [StringType.VIOLA_CAIPIRA]: 'viola caipira',
       [StringType.VIOLINO]: 'violino',
     };

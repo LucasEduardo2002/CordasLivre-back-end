@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "StringType" ADD VALUE IF NOT EXISTS 'UKULELE';

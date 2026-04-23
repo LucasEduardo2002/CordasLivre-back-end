@@ -25,6 +25,37 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Execucao local sem internet
+
+Para rodar tudo na sua maquina sem depender do ambiente hospedado, use o Postgres local do `docker-compose` e mantenha a API apontando para `localhost`.
+
+1. Suba o banco local:
+
+```bash
+docker compose up -d
+```
+
+2. No backend, garanta que `DATABASE_URL` e `DIRECT_URL` apontem para `postgresql://lucas_dev:123@localhost:5432/cordas_db`.
+3. Rode as migrations do Prisma no banco local:
+
+```bash
+npx prisma migrate deploy
+```
+
+4. Inicie o backend em `http://localhost:3000`:
+
+```bash
+npm run start:dev
+```
+
+5. No front, use `VITE_API_URL=http://localhost:3000` e inicie com:
+
+```bash
+npm run dev
+```
+
+Observacao: as telas que dependem de busca externa, como `web-search`, tentarao consultar provedores da web. Sem internet, elas podem retornar vazio ou erro de busca, mas o restante da aplicacao continua funcionando localmente.
+
 ## Busca web agregada (CordasLivre)
 
 Endpoint:

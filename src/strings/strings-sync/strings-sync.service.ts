@@ -117,6 +117,7 @@ export class StringsSyncService {
     { type: StringType.GUITARRA, label: 'Guitarra', categoryId: 'MLB438183', query: 'encordoamento guitarra' },
     { type: StringType.CONTRABAIXO, label: 'Contrabaixo', categoryId: 'MLB438182', query: 'encordoamento baixo' },
     { type: StringType.CAVAQUINHO, label: 'Cavaquinho', query: 'encordoamento cavaquinho' },
+    { type: StringType.UKULELE, label: 'Ukulele', query: 'encordoamento ukulele' },
     { type: StringType.VIOLA_CAIPIRA, label: 'Viola Caipira', query: 'encordoamento viola caipira' },
     { type: StringType.VIOLINO, label: 'Violino', query: 'encordoamento violino' },
   ];
@@ -127,6 +128,7 @@ export class StringsSyncService {
       [StringType.GUITARRA]: 'guitarra',
       [StringType.CONTRABAIXO]: 'contrabaixo',
       [StringType.CAVAQUINHO]: 'cavaquinho',
+      [StringType.UKULELE]: 'ukulele',
       [StringType.VIOLA_CAIPIRA]: 'viola caipira',
       [StringType.VIOLINO]: 'violino',
     };
@@ -219,6 +221,7 @@ export class StringsSyncService {
       [StringType.GUITARRA]: 'Finalidade sugerida: uso geral em guitarra (base, solo e prática)',
       [StringType.CONTRABAIXO]: 'Finalidade sugerida: contrabaixo para prática, ensaio e palco',
       [StringType.CAVAQUINHO]: 'Finalidade sugerida: cavaquinho para base e condução rítmica',
+      [StringType.UKULELE]: 'Finalidade sugerida: ukulele para estudo, base rítmica e repertório acústico',
       [StringType.VIOLA_CAIPIRA]: 'Finalidade sugerida: viola caipira para repertório sertanejo e regional',
       [StringType.VIOLINO]: 'Finalidade sugerida: violino para estudo e performance conforme setup',
     };
@@ -409,6 +412,7 @@ export class StringsSyncService {
     if (normalized.includes('guitarra')) return { type: StringType.GUITARRA, label: 'Guitarra' };
     if (normalized.includes('contrabaixo') || normalized.includes('baixo')) return { type: StringType.CONTRABAIXO, label: 'Contrabaixo' };
     if (normalized.includes('cavaquinho')) return { type: StringType.CAVAQUINHO, label: 'Cavaquinho' };
+    if (normalized.includes('ukulele') || normalized.includes('ukelele')) return { type: StringType.UKULELE, label: 'Ukulele' };
     if (normalized.includes('viola caipira')) return { type: StringType.VIOLA_CAIPIRA, label: 'Viola Caipira' };
     if (normalized.includes('violino')) return { type: StringType.VIOLINO, label: 'Violino' };
     return { type: StringType.VIOLAO, label: 'Violão Clássico' };
@@ -456,6 +460,11 @@ export class StringsSyncService {
         intermediario: 'calibre médio para equilíbrio entre brilho e conforto',
         avancado: 'calibre médio/alto para projeção mais forte',
       },
+      [StringType.UKULELE]: {
+        iniciante: 'nylon leve padrão (soprano/concert) para conforto',
+        intermediario: 'nylon fluorocarbono de tensão média',
+        avancado: 'fluorocarbono ou jogos de tensão média/alta para projeção',
+      },
       [StringType.VIOLA_CAIPIRA]: {
         iniciante: 'jogo leve para menor esforço na mão esquerda',
         intermediario: 'jogo médio para melhor projeção',
@@ -498,6 +507,13 @@ export class StringsSyncService {
         sertanejo: 'Aço com ataque mais marcado',
         jazz: 'Aço de tensão média para articulação limpa',
         pop: 'Aço leve para fraseado confortável',
+      },
+      [StringType.UKULELE]: {
+        rock: 'Fluorocarbono de tensão média para ataque mais definido',
+        mpb: 'Nylon ou fluorocarbono leve/médio para equilíbrio e conforto',
+        sertanejo: 'Fluorocarbono médio para projeção com brilho',
+        jazz: 'Fluorocarbono para articulação mais limpa',
+        pop: 'Nylon leve ou fluorocarbono para resposta rápida',
       },
       [StringType.VIOLA_CAIPIRA]: {
         rock: 'Aço para resposta firme',
@@ -557,13 +573,14 @@ export class StringsSyncService {
       [StringType.GUITARRA]: ['rock', 'jazz', 'pop'],
       [StringType.CONTRABAIXO]: ['rock', 'jazz', 'pop', 'mpb'],
       [StringType.CAVAQUINHO]: ['mpb', 'sertanejo'],
+      [StringType.UKULELE]: ['mpb', 'pop', 'jazz'],
       [StringType.VIOLA_CAIPIRA]: ['sertanejo', 'mpb'],
       [StringType.VIOLINO]: ['jazz', 'pop', 'mpb'],
     };
     const isCommonStyle = (commonStylesByType[instrument.type] ?? []).includes(style);
 
     const confidence: 'alta' | 'media' =
-      (instrument.type === StringType.GUITARRA || instrument.type === StringType.CONTRABAIXO || instrument.type === StringType.VIOLAO) && level !== 'avancado'
+      (instrument.type === StringType.GUITARRA || instrument.type === StringType.CONTRABAIXO || instrument.type === StringType.VIOLAO || instrument.type === StringType.UKULELE) && level !== 'avancado'
         ? 'alta'
         : 'media';
 
@@ -634,6 +651,7 @@ export class StringsSyncService {
       [StringType.GUITARRA]: { baseDays: 75, wearRate: 2.9 },
       [StringType.CONTRABAIXO]: { baseDays: 110, wearRate: 2.2 },
       [StringType.CAVAQUINHO]: { baseDays: 80, wearRate: 2.5 },
+      [StringType.UKULELE]: { baseDays: 85, wearRate: 2.3 },
       [StringType.VIOLA_CAIPIRA]: { baseDays: 95, wearRate: 2.4 },
       [StringType.VIOLINO]: { baseDays: 70, wearRate: 2.8 },
     };
@@ -826,6 +844,7 @@ export class StringsSyncService {
       [StringType.GUITARRA]: ['guitarra'],
       [StringType.CONTRABAIXO]: ['contrabaixo', 'baixo', 'bass'],
       [StringType.CAVAQUINHO]: ['cavaquinho', 'cavaco'],
+      [StringType.UKULELE]: ['ukulele', 'ukelele'],
       [StringType.VIOLA_CAIPIRA]: ['viola caipira', 'caipira'],
       [StringType.VIOLINO]: ['violino'],
     };
@@ -847,6 +866,7 @@ export class StringsSyncService {
       [StringType.GUITARRA]: ['guitarra'],
       [StringType.CONTRABAIXO]: ['contrabaixo', 'baixo', 'bass'],
       [StringType.CAVAQUINHO]: ['cavaquinho', 'cavaco'],
+      [StringType.UKULELE]: ['ukulele', 'ukelele'],
       [StringType.VIOLA_CAIPIRA]: ['viola caipira', 'sertaneja', '10 cordas'],
       [StringType.VIOLINO]: ['violino'],
     };
@@ -876,6 +896,11 @@ export class StringsSyncService {
         'encordoamento cavaquinho',
         'corda cavaquinho',
         'jogo cordas cavaco',
+      ],
+      [StringType.UKULELE]: [
+        'encordoamento ukulele',
+        'corda ukulele',
+        'jogo cordas ukulele',
       ],
       [StringType.VIOLA_CAIPIRA]: [
         'encordoamento viola caipira',
@@ -1478,10 +1503,11 @@ export class StringsSyncService {
       const categoryPriority: Record<StringType, number> = {
         [StringType.VIOLA_CAIPIRA]: 1,
         [StringType.CAVAQUINHO]: 2,
-        [StringType.VIOLINO]: 3,
-        [StringType.CONTRABAIXO]: 4,
-        [StringType.GUITARRA]: 5,
-        [StringType.VIOLAO]: 6,
+        [StringType.UKULELE]: 3,
+        [StringType.VIOLINO]: 4,
+        [StringType.CONTRABAIXO]: 5,
+        [StringType.GUITARRA]: 6,
+        [StringType.VIOLAO]: 7,
       };
       const categoriesToProcess = [...this.stringCategories].sort(
         (a, b) => (categoryPriority[a.type] ?? 99) - (categoryPriority[b.type] ?? 99),
