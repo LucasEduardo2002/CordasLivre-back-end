@@ -91,6 +91,8 @@ type ToneAssistantRecommendation = {
   }>;
 };
 
+type ViolaoFamily = 'nylon' | 'aco';
+
 type MaintenanceInput = {
   userId?: string;
   email?: string;
@@ -461,7 +463,7 @@ export class StringsSyncService {
     };
   }
 
-  private resolveInstrumentFromWizard(instrument?: string): { type: StringType; label: string } {
+  private resolveInstrumentFromWizard(instrument?: string): { type: StringType; label: string; violaoFamily?: ViolaoFamily } {
     const normalized = this.normalizeText(instrument ?? 'violao classico');
 
     if (normalized.includes('guitarra')) return { type: StringType.GUITARRA, label: 'Guitarra' };
@@ -470,7 +472,10 @@ export class StringsSyncService {
     if (normalized.includes('ukulele') || normalized.includes('ukelele')) return { type: StringType.UKULELE, label: 'Ukulele' };
     if (normalized.includes('viola caipira')) return { type: StringType.VIOLA_CAIPIRA, label: 'Viola Caipira' };
     if (normalized.includes('violino')) return { type: StringType.VIOLINO, label: 'Violino' };
-    return { type: StringType.VIOLAO, label: 'Violão Clássico' };
+    if ((normalized.includes('violao') && normalized.includes('aco')) || normalized.includes('acustic')) {
+      return { type: StringType.VIOLAO, label: 'Violão Aço', violaoFamily: 'aco' };
+    }
+    return { type: StringType.VIOLAO, label: 'Violão Clássico', violaoFamily: 'nylon' };
   }
 
   private resolveLevel(level?: string): 'iniciante' | 'intermediario' | 'avancado' {
@@ -493,12 +498,18 @@ export class StringsSyncService {
     const instrument = this.resolveInstrumentFromWizard(input.instrument);
     const level = this.resolveLevel(input.level);
     const style = this.resolveStyle(input.style);
+    const inferViolaoFamilyByStyle = (currentStyle: 'rock' | 'mpb' | 'sertanejo' | 'jazz' | 'pop'): ViolaoFamily => {
+      if (currentStyle === 'rock' || currentStyle === 'sertanejo' || currentStyle === 'pop') return 'aco';
+      return 'nylon';
+    };
+    const violaoFamily: ViolaoFamily =
+      instrument.type === StringType.VIOLAO ? (instrument.violaoFamily ?? inferViolaoFamilyByStyle(style)) : 'aco';
 
     const gaugeProfileByType: Record<StringType, Record<'iniciante' | 'intermediario' | 'avancado', string>> = {
       [StringType.VIOLAO]: {
-        iniciante: '0.10-0.47 (aço) ou tensão baixa/média-baixa (nylon)',
-        intermediario: '0.11-0.52 (aço) ou tensão média (nylon)',
-        avancado: '0.12-0.53 (aço) ou tensão média/alta (nylon)',
+        iniciante: '0.10-0.47',
+        intermediario: '0.11-0.52',
+        avancado: '0.12-0.53',
       },
       [StringType.GUITARRA]: {
         iniciante: '0.09-0.42 ou 0.10-0.46',
@@ -532,15 +543,31 @@ export class StringsSyncService {
       },
     };
 
-    const recommendedGauge = gaugeProfileByType[instrument.type]?.[level] ?? gaugeProfileByType[StringType.VIOLAO].iniciante;
+    const gaugeProfileViolaoByFamily: Record<ViolaoFamily, Record<'iniciante' | 'intermediario' | 'avancado', string>> = {
+      nylon: {
+        iniciante: 'Tensão baixa/média-baixa (jogo clássico leve)',
+        intermediario: 'Tensão média (jogo clássico normal)',
+        avancado: 'Tensão média/alta (jogo clássico hard tension)',
+      },
+      aco: {
+        iniciante: '0.10-0.47 (extra light)',
+        intermediario: '0.11-0.52 (light)',
+        avancado: '0.12-0.53 (light/medium)',
+      },
+    };
+
+    const recommendedGauge =
+      instrument.type === StringType.VIOLAO
+        ? gaugeProfileViolaoByFamily[violaoFamily][level]
+        : (gaugeProfileByType[instrument.type]?.[level] ?? gaugeProfileByType[StringType.VIOLAO].iniciante);
 
     const materialByTypeAndStyle: Record<StringType, Record<'rock' | 'mpb' | 'sertanejo' | 'jazz' | 'pop', string>> = {
       [StringType.VIOLAO]: {
-        mpb: 'Nylon (violão clássico) ou fósforo bronze (violão aço)',
-        sertanejo: 'Aço bronze 80/20 ou fósforo bronze para ataque mais presente',
-        rock: 'Aço fósforo bronze para mais brilho e projeção',
+        mpb: 'Nylon clássico de tensão média',
+        sertanejo: 'Bronze 80/20 (aço) para ataque mais presente',
+        rock: 'Phosphor bronze (aço) para brilho e projeção',
         jazz: 'Nylon de tensão média para timbre mais encorpado',
-        pop: 'Fósforo bronze para equilíbrio entre brilho e corpo',
+        pop: 'Phosphor bronze (aço) para equilíbrio entre brilho e corpo',
       },
       [StringType.GUITARRA]: {
         rock: 'Aço niquelado (nickel wound)',
@@ -586,14 +613,48 @@ export class StringsSyncService {
       },
     };
 
-    const recommendedMaterial = materialByTypeAndStyle[instrument.type]?.[style] ?? materialByTypeAndStyle[StringType.VIOLAO].mpb;
+    const materialViolaoByFamilyAndStyle: Record<ViolaoFamily, Record<'rock' | 'mpb' | 'sertanejo' | 'jazz' | 'pop', string>> = {
+      nylon: {
+        rock: 'Nylon de alta tensão para ataque mais definido',
+        mpb: 'Nylon clássico de tensão média',
+        sertanejo: 'Nylon de tensão média/alta para projeção',
+        jazz: 'Nylon de tensão média para timbre encorpado',
+        pop: 'Nylon de tensão média para equilíbrio e conforto',
+      },
+      aco: {
+        rock: 'Phosphor bronze (aço) para brilho e projeção',
+        mpb: 'Phosphor bronze (aço) para equilíbrio entre corpo e brilho',
+        sertanejo: 'Bronze 80/20 (aço) para ataque mais presente',
+        jazz: 'Phosphor bronze (aço) de tensão média para dinâmica controlada',
+        pop: 'Phosphor bronze (aço) para versatilidade e definição',
+      },
+    };
+
+    const recommendedMaterial =
+      instrument.type === StringType.VIOLAO
+        ? materialViolaoByFamilyAndStyle[violaoFamily][style]
+        : (materialByTypeAndStyle[instrument.type]?.[style] ?? materialByTypeAndStyle[StringType.VIOLAO].mpb);
 
     const tensionByLevel: Record<'iniciante' | 'intermediario' | 'avancado', string> = {
       iniciante: 'Baixa a média-baixa',
       intermediario: 'Média',
       avancado: 'Média a média-alta',
     };
-    const recommendedTension = tensionByLevel[level];
+    const tensionViolaoByFamily: Record<ViolaoFamily, Record<'iniciante' | 'intermediario' | 'avancado', string>> = {
+      nylon: {
+        iniciante: 'Baixa a média-baixa',
+        intermediario: 'Média',
+        avancado: 'Média a alta',
+      },
+      aco: {
+        iniciante: 'Média-baixa',
+        intermediario: 'Média',
+        avancado: 'Média a média-alta',
+      },
+    };
+
+    const recommendedTension =
+      instrument.type === StringType.VIOLAO ? tensionViolaoByFamily[violaoFamily][level] : tensionByLevel[level];
 
     const styleLabel =
       style === 'rock' ? 'Rock' : style === 'sertanejo' ? 'Sertanejo' : style === 'jazz' ? 'Jazz' : style === 'pop' ? 'Pop' : 'MPB';
